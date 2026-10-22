@@ -174,7 +174,7 @@ function loadRiderModel(w) {
 function attachModel(w, gltf) {
   const obj = T3.SkeletonUtils.clone(gltf.scene);
   // 滑雪服：MakeHuman 真人模型（Ara 3D Gen 生成）。夹克/裤子换成光滑面料并向外"充气"做出蓬松感，去掉绑带
-  const PUFF = { 'Techwear jacket': 0.022, 'Techwear pants': 0.018 };
+  const PUFF = { 'Techwear jacket': 0.04, 'Techwear pants': 0.03 };
   const COLOR = { 'Techwear jacket': 0xd9733b, 'Techwear pants': 0xcfc6ac, 'Helmet': 0x16181d, 'Boot shafts': 0x1b1d22, 'Shoes': 0x1b1d22 };
   obj.traverse((o) => {
     if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
@@ -206,7 +206,13 @@ function attachModel(w, gltf) {
   const helmet = new T3.Mesh(new T3.SphereGeometry(1, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), mat(0x1c1f26, { roughness: 0.35 }));
   const goggle = new T3.Mesh(new T3.BoxGeometry(1, 1, 1), new T3.MeshStandardMaterial({ color: 0x8fb7ff, roughness: 0.1, metalness: 0.6 }));
   helmet.castShadow = goggle.castShadow = true; helmet.visible = goggle.visible = false; scene.add(helmet, goggle);
-  w.model = { obj, B, rest, helmet, goggle, hs };
+  // 宽松滑雪服外层（跟着骨骼走）：裤腿、膝部、夹克下摆、手套——遮住膝/髋关节的硬折角
+  const pantsM = new T3.MeshStandardMaterial({ color: 0xcfc6ac, roughness: 0.7 }), jackM = new T3.MeshStandardMaterial({ color: 0xd9733b, roughness: 0.62 }), gloveM = new T3.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.55 });
+  const cyl = new T3.CylinderGeometry(1, 1, 1, 20, 1, true), sph = new T3.SphereGeometry(1, 20, 14);
+  const mk = (g, m) => { const o = new T3.Mesh(g, m); o.castShadow = true; o.frustumCulled = false; scene.add(o); return o; };
+  const garb = { thigh: [mk(cyl, pantsM), mk(cyl, pantsM)], shin: [mk(cyl, pantsM), mk(cyl, pantsM)], knee: [mk(sph, pantsM), mk(sph, pantsM)], hipb: [mk(sph, pantsM), mk(sph, pantsM)],
+    hem: mk(new T3.CylinderGeometry(1, 1, 1, 24, 1, true), jackM), seat: mk(sph, pantsM), glove: [mk(sph, gloveM), mk(sph, gloveM)], cuff: [mk(cyl, gloveM), mk(cyl, gloveM)] };
+  w.model = { obj, B, rest, helmet, goggle, hs, garb };
   for (const o of [...w.bones, ...Object.values(w.J), ...w.boots]) o.visible = false;
   if (D) { frame(st.t); }
 }
@@ -251,6 +257,21 @@ function driveModel(w, P) {
     const toeDir = new T3.Vector3(0, 0, D.stanceSign).applyAxisAngle(new T3.Vector3(0, 1, 0), (front ? 15 : -15) * DEG * D.stanceSign);
     const toeW = toeDir.transformDirection(w.rider.matrixWorld);
     if (B[sd + 'ToeBase']) aim(B[sd + 'Foot'], B[sd + 'ToeBase'], null, toeW.add(w.n.clone().multiplyScalar(-0.35)));
+  }
+  // 5) 宽松外层：每帧按骨骼位置摆放
+  { const G = M.garb, Y = new T3.Vector3(0, 1, 0);
+    const seg = (o, a, b, r0, r1) => { const d = b.clone().sub(a), L = d.length(); o.position.copy(a).add(b).multiplyScalar(0.5); o.quaternion.setFromUnitVectors(Y, d.normalize()); o.scale.set(r0, L * (1 + r1), r0); };
+    const ball = (o, p, r) => { o.position.copy(p); o.scale.setScalar(r); };
+    ['Left', 'Right'].forEach((sd, k) => {
+      const hp = wp(B[sd + 'UpLeg']), kn = wp(B[sd + 'Leg']), an = wp(B[sd + 'Foot']);
+      seg(G.thigh[k], hp, kn, 0.105, 0.08); seg(G.shin[k], kn, an.clone().lerp(kn, 0.08), 0.092, 0.06);
+      ball(G.knee[k], kn, 0.1); ball(G.hipb[k], hp, 0.11);
+      const hd = wp(B[sd + 'Hand']), fa = wp(B[sd + 'ForeArm']), mf = B[sd + 'HandMiddle2'] ? wp(B[sd + 'HandMiddle2']) : hd.clone().lerp(fa, -0.4); ball(G.glove[k], hd.clone().lerp(mf, 0.55), 0.068); G.glove[k].scale.set(0.068, 0.068, 0.068); seg(G.cuff[k], fa.clone().lerp(hd, 0.7), hd, 0.055, 0.0);
+    });
+    const hips = wp(B.Hips), sp = wp(B.Spine1), up = sp.clone().sub(hips).normalize();
+    G.hem.position.copy(hips).add(up.clone().multiplyScalar(0.04)); G.hem.quaternion.setFromUnitVectors(Y, up); G.hem.scale.set(0.19, 0.24, 0.16);
+    G.hem.quaternion.multiply(new T3.Quaternion().setFromAxisAngle(Y, 0)); 
+    ball(G.seat, hips.clone().add(up.clone().multiplyScalar(-0.04)), 0.165);
   }
   // 4) 头盔/护目镜跟随头骨
   const hq = worldQ(B.Head), hp = wp(B.Head), r = 0.125;
