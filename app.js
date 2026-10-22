@@ -164,10 +164,10 @@ function build() {
 // ---------------------------------------------------------------- 真人蒙皮模型（three.js 官方示例 Michelle，Mixamo 骨骼）
 // 做法同 Trackk：关节点先按"双脚钉板 + 两段 IK + 默认站姿 + 测得的倾斜"解出来，再把每根骨头从 T-pose 转到对应方向。
 const RIDER_GLTF = {};
-function riderCfg() { const r = (D && D.meta.rider) || {}; return { model: r.model || 'male', jacket: r.jacket ?? 0xd9733b, pants: r.pants ?? 0xeef1f4, visor: r.visor ?? 0xf2a33a }; }
+function riderCfg() { const r = (D && D.meta.rider) || {}; return { model: qs.get('rider') || r.model || 'male', jacket: r.jacket ?? 0xd9733b, pants: r.pants ?? 0xeef1f4, visor: r.visor ?? 0xf2a33a }; }
 function b64ToBuf(b64) { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
 function loadRiderModel(w) {
-  const cfg = riderCfg(), b64 = cfg.model === 'female' ? window.RIDER_GLB_F : window.RIDER_GLB;
+  const cfg = riderCfg(), b64 = cfg.model === 'whale' ? window.RIDER_GLB_W : cfg.model === 'female' ? window.RIDER_GLB_F : window.RIDER_GLB;
   if (!b64 || !T3.GLTFLoader) return;
   const ready = (g) => { if (world !== w) return; attachModel(w, g); };
   if (RIDER_GLTF[cfg.model]) return ready(RIDER_GLTF[cfg.model]);
@@ -197,13 +197,20 @@ function attachModel(w, gltf) {
     });
     o.material = Array.isArray(o.material) ? out : out[0];
   });
-  const B = {}; obj.traverse((o) => { if (o.isBone) B[o.name.replace('mixamorig:', '').replace('mixamorig', '')] = o; });
+  let B = {}; obj.traverse((o) => { if (o.isBone) B[o.name.replace('mixamorig:', '').replace('mixamorig', '')] = o; });
+  const WHALE = RC.model === 'whale';
+  if (WHALE) { // 鲸尾女仆（Meshy 生成 + 52 骨绑定）：骨骼名映射到 Mixamo 命名；只有 Spine/Chest 两节，Spine1/Spine2 都指向 Chest
+    const W = B; B = { Hips: W.Hips, Spine: W.Spine, Spine1: W.Chest, Spine2: W.Chest, Neck: W.Neck, Head: W.Head };
+    for (const [sd, S] of [['Left', 'L'], ['Right', 'R']]) Object.assign(B, { [sd + 'Shoulder']: W['Clavicle' + S], [sd + 'Arm']: W['UpperArm' + S], [sd + 'ForeArm']: W['Forearm' + S], [sd + 'Hand']: W['Hand' + S], [sd + 'UpLeg']: W['Thigh' + S], [sd + 'Leg']: W['Shin' + S], [sd + 'Foot']: W['Foot' + S], [sd + 'ToeBase']: W['Toe' + S] });
+    B._sec = { tail: [1, 2, 3, 4].map((i) => W['Tail0' + i]).filter(Boolean), skirt: ['SkirtFront', 'SkirtBack', 'SkirtL', 'SkirtR', 'Apron'].map((n) => W[n]).filter(Boolean), hair: Object.keys(W).filter((k) => k.startsWith('Hair')).map((k) => W[k]) };
+  }
   scene.add(obj); obj.updateMatrixWorld(true);
   // 缩放：模型髋→踝长度 对齐到我们解算用的 TH+SH
   const wp = (b) => b.getWorldPosition(new T3.Vector3());
   const leg = wp(B.LeftUpLeg).distanceTo(wp(B.LeftLeg)) + wp(B.LeftLeg).distanceTo(wp(B.LeftFoot));
   obj.scale.multiplyScalar((TH + SH) / leg); obj.updateMatrixWorld(true);
-  const rest = {}; for (const k in B) rest[k] = B[k].quaternion.clone();
+  const rest = {}; for (const k in B) if (B[k] && B[k].isBone) rest[k] = B[k].quaternion.clone();
+  const restSec = WHALE ? [...B._sec.tail, ...B._sec.skirt, ...B._sec.hair].map((b) => [b, b.quaternion.clone()]) : [];
   // 头盔 + 护目镜（挂在头骨上，跟随转动）
   const hs = wp(B.Head).distanceTo(wp(B.HeadTop_End || B.Head)) || 0.2;
   const helmet = new T3.Mesh(new T3.SphereGeometry(1, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), mat(0x1c1f26, { roughness: 0.35 }));
@@ -215,7 +222,9 @@ function attachModel(w, gltf) {
   const mk = (g, m) => { const o = new T3.Mesh(g, m); o.castShadow = true; o.frustumCulled = false; scene.add(o); return o; };
   const garb = { thigh: [mk(cyl, pantsM), mk(cyl, pantsM)], shin: [mk(cyl, pantsM), mk(cyl, pantsM)], knee: [mk(sph, pantsM), mk(sph, pantsM)], hipb: [mk(sph, pantsM), mk(sph, pantsM)],
     hem: mk(new T3.CylinderGeometry(1, 1, 1, 24, 1, true), jackM), seat: mk(sph, pantsM), torso: mk(sph, jackM), chest: mk(sph, jackM), uarm: [mk(cyl, jackM), mk(cyl, jackM)], farm: [mk(cyl, jackM), mk(cyl, jackM)], elb: [mk(sph, jackM), mk(sph, jackM)], shd: [mk(sph, jackM), mk(sph, jackM)], collar: mk(cyl, jackM), glove: [mk(sph, gloveM), mk(sph, gloveM)], cuff: [mk(cyl, gloveM), mk(cyl, gloveM)] };
-  w.model = { obj, B, rest, helmet, goggle, hs, garb };
+  const headFwd = new T3.Vector3(0, 0, 1).applyQuaternion(obj.getWorldQuaternion(new T3.Quaternion())).applyQuaternion(B.Head.getWorldQuaternion(new T3.Quaternion()).invert()).normalize();
+  if (WHALE) for (const g of Object.values(garb)) for (const o of [].concat(g)) o.visible = false;
+  w.model = { obj, B, rest, restSec, headFwd: WHALE ? headFwd : new T3.Vector3(0, 0, 1), helmet, goggle, hs, garb, whale: WHALE };
   for (const o of [...w.bones, ...Object.values(w.J), ...w.boots]) o.visible = false;
   if (D) { frame(st.t); }
 }
@@ -223,6 +232,7 @@ const _q = new T3.Quaternion(), _q2 = new T3.Quaternion(), _m = new T3.Matrix4()
 function worldQ(o) { return o.getWorldQuaternion(new T3.Quaternion()); }
 function setWorldQ(bone, qw) { const pq = worldQ(bone.parent).invert(); bone.quaternion.copy(pq.multiply(qw)); bone.updateMatrixWorld(true); }
 function aim(bone, child, target, dirWanted) { // 摆动：让 bone→child 指向 dirWanted
+  if (!bone || !child || bone === child) return;
   const a = bone.getWorldPosition(new T3.Vector3()), b = child.getWorldPosition(new T3.Vector3());
   const cur = b.sub(a).normalize(), d = dirWanted.clone().normalize();
   const dq = new T3.Quaternion().setFromUnitVectors(cur, d);
@@ -252,7 +262,7 @@ function driveModel(w, P) {
   { const t = st.t, upN = wp(B.Head).sub(wp(B.Neck)).normalize();
     const lead = (() => { const t0 = Math.max(0, t - 0.12), t1 = Math.min(D.meta.duration - 0.01, t + 0.12); let d = ang(D.bear_travel, t1) - ang(D.bear_travel, t0); d = ((d + 540) % 360 - 180) / (t1 - t0); return Math.max(-50, Math.min(50, d * 0.35)); })();
     const look = bearingVec(ang(D.bear_travel, t) + lead, w.n);
-    const fw = new T3.Vector3(0, 0, 1).applyQuaternion(worldQ(B.Head));
+    const fw = M.headFwd.clone().applyQuaternion(worldQ(B.Head));
     const pf = fw.clone().sub(upN.clone().multiplyScalar(fw.dot(upN))).normalize(), pl = look.clone().sub(upN.clone().multiplyScalar(look.dot(upN))).normalize();
     let a = Math.atan2(pf.clone().cross(pl).dot(upN), pf.dot(pl)) / DEG;
     a = smooth('headYaw', Math.max(-60, Math.min(60, a)), t, 0.22);
@@ -275,8 +285,18 @@ function driveModel(w, P) {
     const toeW = toeDir.transformDirection(w.rider.matrixWorld);
     if (B[sd + 'ToeBase']) aim(B[sd + 'Foot'], B[sd + 'ToeBase'], null, toeW.add(w.n.clone().multiplyScalar(-0.35)));
   }
+  if (M.whale) { // 尾巴、裙摆、头发：随转速和上下颠簸滞后摆动
+    const t = st.t; for (const [b, q] of M.restSec) b.quaternion.copy(q);
+    const t0 = Math.max(0, t - 0.12), t1 = Math.min(D.meta.duration - 0.01, t + 0.12);
+    let yr = ang(D.bear_travel, t1) - ang(D.bear_travel, t0); yr = ((yr + 540) % 360 - 180) / (t1 - t0);
+    const sw = smooth('tailSw', Math.max(-1, Math.min(1, yr / 90)), t, 0.35), rl = smooth('tailRl', Math.max(-1, Math.min(1, num(D.roll, t) / 50)), t, 0.3);
+    const upW = new T3.Vector3(0, 1, 0);
+    M.B._sec.tail.forEach((b, i) => { b.rotateOnWorldAxis(upW, -sw * 0.22 * (1 + i * 0.3)); b.rotateZ(Math.sin(t * 2.2 - i * 0.7) * 0.05); b.updateMatrixWorld(true); });
+    M.B._sec.skirt.forEach((b) => { b.rotateOnWorldAxis(upW, -sw * 0.08); b.updateMatrixWorld(true); });
+    M.B._sec.hair.forEach((b, i) => { b.rotateOnWorldAxis(upW, -sw * 0.12); b.rotateX(-rl * 0.04 * (i % 2 ? 1 : -1)); b.updateMatrixWorld(true); });
+  }
   // 5) 宽松外层：每帧按骨骼位置摆放
-  { const G = M.garb, Y = new T3.Vector3(0, 1, 0);
+  if (!M.whale) { const G = M.garb, Y = new T3.Vector3(0, 1, 0);
     const seg = (o, a, b, r0, r1) => { const d = b.clone().sub(a), L = d.length(); o.position.copy(a).add(b).multiplyScalar(0.5); o.quaternion.setFromUnitVectors(Y, d.normalize()); o.scale.set(r0, L * (1 + r1), r0); };
     const ball = (o, p, r) => { o.position.copy(p); o.scale.setScalar(r); };
     ['Left', 'Right'].forEach((sd, k) => {
@@ -296,6 +316,7 @@ function driveModel(w, P) {
     ball(G.seat, hips.clone().add(up.clone().multiplyScalar(-0.04)), 0.165);
   }
   // 4) 头盔/护目镜跟随头骨
+  if (M.whale) return;
   const hq = worldQ(B.Head), hp = wp(B.Head), r = 0.125;
   const up = new T3.Vector3(0, 1, 0).applyQuaternion(hq), fw = new T3.Vector3(0, 0, 1).applyQuaternion(hq);
   M.helmet.position.copy(hp).add(up.clone().multiplyScalar(0.075)).add(fw.clone().multiplyScalar(-0.01)); M.helmet.quaternion.copy(hq); M.helmet.scale.setScalar(r);
