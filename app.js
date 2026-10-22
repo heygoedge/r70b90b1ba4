@@ -14,9 +14,12 @@ renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = T3.PCFSoftShadowMap;
 renderer.outputColorSpace = T3.SRGBColorSpace; renderer.toneMapping = T3.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
 const scene = new T3.Scene();
-scene.background = new T3.Color(0xcfd8e6);
-scene.fog = new T3.Fog(0xcfd8e6, 60, 260);
-const camera = new T3.PerspectiveCamera(38, 1, 0.05, 2000);
+{ // 天空渐变（同 Trackk 的蓝天）
+  const cv = document.createElement('canvas'); cv.width = 2; cv.height = 256; const cx = cv.getContext('2d'); const gr = cx.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, '#6fb2e8'); gr.addColorStop(0.55, '#a9d1f0'); gr.addColorStop(1, '#e6f1fa'); cx.fillStyle = gr; cx.fillRect(0, 0, 2, 256);
+  const tx = new T3.CanvasTexture(cv); tx.colorSpace = T3.SRGBColorSpace; scene.background = tx; }
+scene.fog = new T3.Fog(0xdfeaf5, 80, 420);
+const camera = new T3.PerspectiveCamera(46, 1, 0.05, 3000);
 const controls = new T3.OrbitControls(camera, canvas);
 controls.enableDamping = true;
 scene.add(new T3.HemisphereLight(0xf4f8ff, 0x9aa8bd, 1.25));
@@ -62,8 +65,13 @@ function build() {
   for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) { const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ; pos.push(x, planeY(x, z) - 0.01, z); }
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) { const a = j * (NX + 1) + i; idx.push(a, a + NX + 1, a + 1, a + 1, a + NX + 1, a + NX + 2); }
   g.setAttribute('position', new T3.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
-  const slope = new T3.Mesh(g, mat(0xf7f9fc, { roughness: 0.92 })); slope.receiveShadow = true; root.add(slope);
-  const grid = new T3.LineSegments(new T3.WireframeGeometry(g), new T3.LineBasicMaterial({ color: 0xc9d3e2, transparent: true, opacity: 0.55 }));
+  const snowTex = (() => { const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256; const c = cv.getContext('2d'); c.fillStyle = '#f6f8fb'; c.fillRect(0, 0, 256, 256);
+    for (let y = 0; y < 256; y += 8) { c.fillStyle = 'rgba(170,185,205,0.18)'; c.fillRect(0, y, 256, 3); }
+    for (let i = 0; i < 900; i++) { c.fillStyle = `rgba(150,165,185,${Math.random() * 0.12})`; c.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); }
+    const t = new T3.CanvasTexture(cv); t.wrapS = t.wrapT = T3.RepeatWrapping; t.colorSpace = T3.SRGBColorSpace; t.anisotropy = 8; return t; })();
+  { const uv = []; const pa = g.attributes.position; for (let i = 0; i < pa.count; i++) uv.push(pa.getX(i) / 2.5, pa.getZ(i) / 2.5); g.setAttribute('uv', new T3.Float32BufferAttribute(uv, 2)); }
+  const slope = new T3.Mesh(g, mat(0xffffff, { roughness: 0.92, map: snowTex })); slope.receiveShadow = true; root.add(slope);
+  const grid = new T3.LineSegments(new T3.WireframeGeometry(g), new T3.LineBasicMaterial({ color: 0xc9d3e2, transparent: true, opacity: 0.0 }));
   grid.position.copy(n.clone().multiplyScalar(0.005)); root.add(grid);
   // 滚落线箭头
   const fb = D.meta.fall_bearing, mid = P[Math.floor(P.length / 2)];
@@ -74,14 +82,14 @@ function build() {
   const rb = new T3.BufferGeometry(), rp = [], rc = [];
   for (let i = 0; i < P.length - 1; i++) {
     const d = P[i + 1].clone().sub(P[i]); if (d.lengthSq() < 1e-6) d.set(1, 0, 0);
-    const side = d.clone().cross(n).normalize().multiplyScalar(0.28);
+    const side = d.clone().cross(n).normalize().multiplyScalar(0.07);
     const lift = n.clone().multiplyScalar(0.02);
     const a = P[i].clone().add(lift), b = P[i + 1].clone().add(lift);
     const c = edgeColor(D.roll[i]);
     for (const p of [a.clone().add(side), a.clone().sub(side), b.clone().add(side), a.clone().sub(side), b.clone().sub(side), b.clone().add(side)]) { rp.push(p.x, p.y, p.z); rc.push(c.r, c.g, c.b); }
   }
   rb.setAttribute('position', new T3.Float32BufferAttribute(rp, 3)); rb.setAttribute('color', new T3.Float32BufferAttribute(rc, 3));
-  root.add(new T3.Mesh(rb, new T3.MeshBasicMaterial({ vertexColors: true, side: T3.DoubleSide, transparent: true, opacity: 0.85 })));
+  const ribbon = new T3.Mesh(rb, new T3.MeshBasicMaterial({ vertexColors: true, side: T3.DoubleSide, transparent: true, opacity: 0.85 })); ribbon.frustumCulled = false; root.add(ribbon);
   // 每 0.4 s 画一道"板长轴"短线：线和轨迹的夹角就是侧滑
   const tk = [], step = Math.round(0.4 * D.meta.fs);
   for (let i = 0; i < P.length; i += step) {
@@ -89,7 +97,7 @@ function build() {
     tk.push(...p.clone().add(u).toArray(), ...p.clone().sub(u).toArray());
   }
   const tg = new T3.BufferGeometry(); tg.setAttribute('position', new T3.Float32BufferAttribute(tk, 3));
-  root.add(new T3.LineSegments(tg, new T3.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.55 })));
+  const ticks = new T3.LineSegments(tg, new T3.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.55 })); ticks.frustumCulled = false; ticks.visible = false; root.add(ticks);
   // GPS 原始点
   if (D.gps && D.gps.length) {
     const gg = new T3.SphereGeometry(0.18, 8, 6), gm = new T3.MeshBasicMaterial({ color: D.meta.gps_ok ? 0x3b6fd8 : 0xb04a4a, transparent: true, opacity: 0.7 });
@@ -136,7 +144,7 @@ function build() {
   const bones = BONES.map(([a, b, m, r]) => { const o = new T3.Mesh(cyl, bm[m]); o.userData = { a, b, r }; rider.add(o); return o; });
   // 靴子
   const boots = [0, 1].map(() => { const o = new T3.Mesh(new T3.BoxGeometry(0.13, 0.12, 0.3), mat(0x2b2f38)); rider.add(o); return o; });
-  world = { root, board, rider, J, bones, boots, aTravel, aNose, n, P, model: null };
+  world = { root, board, rider, J, bones, boots, aTravel, aNose, n, P, model: null, ribbon, ticks };
   loadRiderModel(world);
   drawTimeline();
 }
@@ -155,7 +163,7 @@ function attachModel(w, gltf) {
   const obj = T3.SkeletonUtils.clone(gltf.scene);
   // 换装：按每个顶点主要绑定的骨骼分区上色（夹克 / 裤子 / 靴子 / 手套 / 皮肤），保留真实人体外形
   const PART = (nm) => /Hand|Thumb|Index|Middle|Ring|Pinky/.test(nm) ? 'glove' : /Foot|Toe/.test(nm) ? 'boot' : /UpLeg|Leg/.test(nm) ? 'pants' : /Head|Neck|Eye/.test(nm) ? 'head' : 'jacket';
-  const COL = { jacket: new T3.Color(0xd9733b), pants: new T3.Color(0xcfc6ac), boot: new T3.Color(0x23262d), glove: new T3.Color(0x2b2f38), head: new T3.Color(0xc79a7c) };
+  const COL = { jacket: new T3.Color(0xd9733b), pants: new T3.Color(0xcfc6ac), boot: new T3.Color(0x23262d), glove: new T3.Color(0x2b2f38), head: new T3.Color(0x1c1f26) };
   obj.traverse((o) => {
     if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
     if (o.isSkinnedMesh) {
@@ -165,7 +173,7 @@ function attachModel(w, gltf) {
       g.setAttribute('color', new T3.BufferAttribute(cols, 3));
       // 头发收进头盔：头部顶点离头骨中心超过半径的，拉回到半径内（绑定姿态的网格空间里做）
       const hi = bones.findIndex((x) => /Head$/.test(x.name)), ti = bones.findIndex((x) => /HeadTop_End/.test(x.name));
-      if (hi >= 0) {
+      if (hi >= 0 && window.RIDER_COLLAPSE_HAIR) {
         const hc = new T3.Vector3().setFromMatrixPosition(o.skeleton.boneInverses[hi].clone().invert());
         const ht = ti >= 0 ? new T3.Vector3().setFromMatrixPosition(o.skeleton.boneInverses[ti].clone().invert()) : hc.clone().add(new T3.Vector3(0, 18, 0));
         const ctr = hc.clone().lerp(ht, 0.45), R = hc.distanceTo(ht) * 0.5, pa = g.attributes.position, v = new T3.Vector3();
@@ -173,7 +181,8 @@ function attachModel(w, gltf) {
           if (bi !== hi && bi !== ti) continue; v.fromBufferAttribute(pa, i); const d = v.distanceTo(ctr); if (d > R) { v.sub(ctr).multiplyScalar(R / d).add(ctr); pa.setXYZ(i, v.x, v.y, v.z); } }
         pa.needsUpdate = true; g.computeVertexNormals();
       }
-      o.material = new T3.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.0 });
+      const isVisor = /visor/i.test(o.name) || /Visor/.test((o.material && o.material.name) || '');
+      o.material = isVisor ? new T3.MeshStandardMaterial({ color: 0x6f8fd8, roughness: 0.12, metalness: 0.7 }) : new T3.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.0 });
     }
   });
   const B = {}; obj.traverse((o) => { if (o.isBone) B[o.name.replace('mixamorig:', '').replace('mixamorig', '')] = o; });
@@ -187,7 +196,7 @@ function attachModel(w, gltf) {
   const hs = wp(B.Head).distanceTo(wp(B.HeadTop_End || B.Head)) || 0.2;
   const helmet = new T3.Mesh(new T3.SphereGeometry(1, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), mat(0x1c1f26, { roughness: 0.35 }));
   const goggle = new T3.Mesh(new T3.BoxGeometry(1, 1, 1), new T3.MeshStandardMaterial({ color: 0x8fb7ff, roughness: 0.1, metalness: 0.6 }));
-  helmet.castShadow = goggle.castShadow = true; scene.add(helmet, goggle);
+  helmet.castShadow = goggle.castShadow = true; helmet.visible = goggle.visible = false; scene.add(helmet, goggle);
   w.model = { obj, B, rest, helmet, goggle, hs };
   for (const o of [...w.bones, ...Object.values(w.J), ...w.boots]) o.visible = false;
   if (D) { frame(st.t); }
@@ -224,7 +233,8 @@ function driveModel(w, P) {
   // 3) 手臂、腿：逐节摆动对准
   for (const [sd, S] of [['Left', 'L'], ['Right', 'R']]) {
     aim(B[sd + 'Arm'], B[sd + 'ForeArm'], null, T[S + 'Elbow'].clone().sub(T[S + 'Shoulder']));
-    aim(B[sd + 'ForeArm'], B[sd + 'Hand'], null, T[S + 'Wrist'].clone().sub(T[S + 'Elbow']));
+    const hand = B[sd + 'Hand'] || B[sd + 'ForeArm'].children.find((c) => c.isBone);
+    if (hand) aim(B[sd + 'ForeArm'], hand, null, T[S + 'Wrist'].clone().sub(T[S + 'Elbow']));
     aim(B[sd + 'UpLeg'], B[sd + 'Leg'], null, T[S + 'Knee'].clone().sub(T[S + 'Hip']));
     aim(B[sd + 'Leg'], B[sd + 'Foot'], null, T[S + 'Ankle'].clone().sub(T[S + 'Knee']));
     // 脚掌平放在板上，脚尖指向前刃侧（固定器角度 ±15°）
@@ -337,14 +347,16 @@ function frame(t) {
   const top = w.board.position.clone().add(n.clone().multiplyScalar(0.05));
   w.aTravel.position.copy(top); w.aTravel.setDirection(bearingVec(bt, n));
   w.aNose.position.copy(top); w.aNose.setDirection(bearingVec(bn, n));
+  // 轨迹边滑边出：只画到当前时刻
+  { const [ii] = idxAt(t); w.ribbon.geometry.setDrawRange(0, Math.max(0, ii) * 6); }
   const tilt = placeBody(t);
   // 镜头
   const trv = bearingVec(bt, n), side = trv.clone().cross(n).normalize();
   let camPos = null;
-  if (st.camMode === 'chase') camPos = p.clone().add(trv.clone().multiplyScalar(-2.9)).add(n.clone().multiplyScalar(1.25)).add(side.clone().multiplyScalar(0.6));
+  if (st.camMode === 'chase') camPos = p.clone().add(trv.clone().multiplyScalar(-4.6)).add(n.clone().multiplyScalar(2.3)).add(side.clone().multiplyScalar(0.9));
   else if (st.camMode === 'side') camPos = p.clone().add(side.clone().multiplyScalar(-3.2)).add(n.clone().multiplyScalar(1.0)).add(trv.clone().multiplyScalar(0.6));
   else if (st.camMode === 'top') camPos = p.clone().add(new T3.Vector3(0, 22, 0.01));
-  const target = p.clone().add(n.clone().multiplyScalar(0.75));
+  const target = p.clone().add(n.clone().multiplyScalar(0.6)).add(trv.clone().multiplyScalar(1.2));
   sun.position.copy(p).add(new T3.Vector3(6, 14, 5)); sun.target.position.copy(p);
   if (camPos) { camera.position.lerp(camPos, st.snap ? 1 : 0.12); controls.target.lerp(target, st.snap ? 1 : 0.2); st.snap = false; }
   else { const dlt = target.clone().sub(controls.target); controls.target.add(dlt); camera.position.add(dlt); }
