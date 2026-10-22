@@ -334,6 +334,9 @@ function solveBody(t) {
   // 折叠（angulation）：上身比板面法向更"立"一些——取比力方向与坡面法向之间偏向比力 65% 的方向（估算，单板常见折叠 15–25°）
   if (world && world.board) { const nl = world.n.clone().applyQuaternion(world.board.quaternion.clone().invert()).normalize(); f = f.clone().lerp(nl, 0.35).normalize(); }
   const mode = currentBodyMode();
+  const fi = Math.min(D.t.length - 1, Math.max(0, Math.round(t * D.meta.fs))), fside = D.fall ? D.fall[fi] : 0;
+  const fallW = smooth('fallW', fside ? 1 : 0, t, 0.35); if (fside) st.fallSide = fside;
+  const nlS = (world && world.board) ? world.n.clone().applyQuaternion(world.board.quaternion.clone().invert()).normalize() : Y.clone();
   // 动态量：板转速（°/s，俯视顺时针为正）、立刃、比力大小 → 用来驱动上身的"主动动作"（估算，标注在面板里）
   const dtq = 0.12, t0q = Math.max(0, t - dtq), t1q = Math.min(D.meta.duration - 0.01, t + dtq);
   let wr = ang(D.bear_nose, t1q) - ang(D.bear_nose, t0q); wr = ((wr + 540) % 360 - 180) / (t1q - t0q);
@@ -353,10 +356,18 @@ function solveBody(t) {
   let crouch = 0.13 * ea + 0.05 * Math.min(1, Math.max(0, gmag - 1)) - 0.03 * (1 - ea) + Math.max(-0.05, Math.min(0.08, bAbs));   // 弯顶压低，换刃时伸展
   crouch = smooth('crouch', crouch, t, 0.12);
   const P0 = footMid.clone().add(up.clone().multiplyScalar(0.80 - crouch)).add(F.clone().multiplyScalar(-0.05 - 0.06 * ea * Math.sign(edgeNow) * s));
-  const hips = chestQ ? footMid.clone().add(P0.clone().sub(footMid).applyQuaternion(pelvisQ)) : P0;
+  let hips = chestQ ? footMid.clone().add(P0.clone().sub(footMid).applyQuaternion(pelvisQ)) : P0;
+  // 倒地姿态：后刃=坐在雪上（臀部落在脚跟一侧、离雪面 12 cm），前刃=跪（膝盖着雪、臀部在脚尖一侧抬高）；都按雪面法向摆，避免穿模
+  const fs2 = st.fallSide || 1;
+  const toeDir = F.clone().sub(nlS.clone().multiplyScalar(F.dot(nlS))).normalize();
+  if (fallW > 0.01) {
+    const hipsFall = fs2 > 0 ? footMid.clone().add(toeDir.clone().multiplyScalar(-0.42)).add(nlS.clone().multiplyScalar(0.14))
+                             : footMid.clone().add(toeDir.clone().multiplyScalar(0.34)).add(nlS.clone().multiplyScalar(0.46));
+    hips = hips.clone().lerp(hipsFall, fallW);
+  }
   const hipAxis = leftSide.clone().applyQuaternion(pelvisQ);
   const LH = hips.clone().add(hipAxis.clone().multiplyScalar(0.11)), RH = hips.clone().add(hipAxis.clone().multiplyScalar(-0.11));
-  const pole = F.clone().add(up.clone().multiplyScalar(0.1));
+  const pole = F.clone().add(up.clone().multiplyScalar(0.1)).add(nlS.clone().multiplyScalar(fs2 > 0 ? 1.4 * fallW : 0)); // 坐下时膝盖朝上
   const LK = legIK(LH, LA, pole.clone().add(leftSide.clone().multiplyScalar(0.25)));
   const RK = legIK(RH, RA, pole.clone().add(leftSide.clone().multiplyScalar(-0.25)));
   // 躯干：默认站姿 = 上方向 + 向前（脚尖侧）弯 18°，肩线朝板头打开 15°
@@ -365,6 +376,7 @@ function solveBody(t) {
   const twist = smooth('twist', Math.max(-28, Math.min(28, -wr * 0.16)) + 10 * Math.sign(edgeNext - edgeNow) * Math.min(1, Math.abs(edgeNext - edgeNow) / 25) * (Math.abs(edgeNow) < 15 ? 1 : 0), t, 0.18);
   let W = leftSide.clone().applyAxisAngle(up, (15 + twist) * DEG * s).normalize();
   if (chestQ) { U = U.applyQuaternion(chestQ).normalize(); W = W.applyQuaternion(chestQ).normalize(); } // 胸口手机的实测转动叠加在动态站姿上
+  if (fallW > 0.01) { const Uf = nlS.clone().add(toeDir.clone().multiplyScalar(fs2 > 0 ? -0.35 : 0.15)).normalize(); U = U.clone().lerp(Uf, fallW).normalize(); }
   const Fw = U.clone().cross(W).multiplyScalar(-s).normalize(); // 胸口朝向
   const spine = hips.clone().add(U.clone().multiplyScalar(0.2)), chest = hips.clone().add(U.clone().multiplyScalar(0.4));
   const neck = hips.clone().add(U.clone().multiplyScalar(0.55)), head = hips.clone().add(U.clone().multiplyScalar(0.7));
@@ -376,6 +388,14 @@ function solveBody(t) {
   const LW = LE.clone().add(U.clone().multiplyScalar(-0.08 + armUp)).add(W.clone().multiplyScalar(0.2)).add(Fw.clone().multiplyScalar(0.1 + 0.08 * sw));
   const RE = RS.clone().add(U.clone().multiplyScalar(-0.22 + armUp * 0.4)).add(W.clone().multiplyScalar(-0.12 - 0.05 * sw)).add(Fw.clone().multiplyScalar(0.05 - 0.07 * sw));
   const RW = RE.clone().add(U.clone().multiplyScalar(-0.12 + armUp * 0.8)).add(W.clone().multiplyScalar(-0.14)).add(Fw.clone().multiplyScalar(0.08 - 0.1 * sw));
+  if (fallW > 0.01) { // 手撑雪面：坐=撑在身后，跪=撑在身前
+    const back = toeDir.clone().multiplyScalar(fs2 > 0 ? -1 : 1);
+    for (const [E, Wr, sh, sg] of [[LE, LW, LS, 1], [RE, RW, RS, -1]]) {
+      const hand = hips.clone().add(back.clone().multiplyScalar(0.28)).add(leftSide.clone().multiplyScalar(0.22 * sg)).add(nlS.clone().multiplyScalar(-(hips.clone().sub(footMid).dot(nlS)) + 0.03));
+      const elb = sh.clone().lerp(hand, 0.5).add(back.clone().multiplyScalar(0.06));
+      Wr.lerp(hand, fallW); E.lerp(elb, fallW);
+    }
+  }
   const left = { LHip: LH, LKnee: LK, LAnkle: LA, LShoulder: LS, LElbow: LE, LWrist: LW };
   const right = { RHip: RH, RKnee: RK, RAnkle: RA, RShoulder: RS, RElbow: RE, RWrist: RW };
   return Object.assign({ Hips: hips, Spine: spine, Chest: chest, Neck: neck, Head: head }, left, right, { _tilt: Math.acos(Math.max(-1, Math.min(1, U.dot(Y)))) / DEG });
@@ -596,6 +616,16 @@ function load(name) {
   const mode = currentBodyMode();
   $('bodytag').textContent = mode === 'chest' ? '身体 · 手机驱动胸口' : '身体 · 估算';
   st.mm = null; buildChips();
+  // 摔倒判定（规则）：速度 <8 km/h 且立刃 >40° 进入；之后速度 <5.5 km/h 一直算倒地/起身，>5.5 才结束；记录倒下时是后刃（坐）还是前刃（跪）
+  { const n = D.t.length; D.fall = new Int8Array(n); let on = 0, side = 0;
+    let flat = 0;
+    for (let i = 0; i < n; i++) { const v = D.speed[i] * 3.6, r = D.roll[i];
+      flat = Math.abs(r) < 15 ? flat + 1 / D.meta.fs : 0;
+      if (!on && v < 8 && Math.abs(r) > 40) { on = 1; side = r > 0 ? 1 : -1; }
+      else if (on && ((v > 5.5 && Math.abs(r) < 30) || flat > 1.2)) on = 0;   // 板放平 1.2 s 视为已站起
+      D.fall[i] = on ? side : 0; }
+    // 至少持续 0.6 s 才算，避免慢速大立刃的正常弯被误判
+    let i = 0; while (i < n) { if (!D.fall[i]) { i++; continue; } let j = i; while (j < n && D.fall[j]) j++; if ((j - i) / D.meta.fs < 0.6) for (let k = i; k < j; k++) D.fall[k] = 0; i = j; } }
   $('trajtag').textContent = D.meta.gps_ok ? '轨迹 · GPS 融合' : '轨迹 · 侧切模型推算';
   $('trajtag').className = 'tag ' + (D.meta.gps_ok ? 'ok' : 'est');
   $('legend').innerHTML = legendHtml();
