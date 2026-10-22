@@ -163,19 +163,22 @@ function build() {
 
 // ---------------------------------------------------------------- 真人蒙皮模型（three.js 官方示例 Michelle，Mixamo 骨骼）
 // 做法同 Trackk：关节点先按"双脚钉板 + 两段 IK + 默认站姿 + 测得的倾斜"解出来，再把每根骨头从 T-pose 转到对应方向。
-let RIDER_GLTF = null;
+const RIDER_GLTF = {};
+function riderCfg() { const r = (D && D.meta.rider) || {}; return { model: r.model || 'male', jacket: r.jacket ?? 0xd9733b, pants: r.pants ?? 0xeef1f4, visor: r.visor ?? 0xf2a33a }; }
 function b64ToBuf(b64) { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
 function loadRiderModel(w) {
-  if (!window.RIDER_GLB || !T3.GLTFLoader) return;
+  const cfg = riderCfg(), b64 = cfg.model === 'female' ? window.RIDER_GLB_F : window.RIDER_GLB;
+  if (!b64 || !T3.GLTFLoader) return;
   const ready = (g) => { if (world !== w) return; attachModel(w, g); };
-  if (RIDER_GLTF) return ready(RIDER_GLTF);
-  new T3.GLTFLoader().parse(b64ToBuf(window.RIDER_GLB), '', (g) => { RIDER_GLTF = g; ready(g); }, (e) => console.error('rider glb', e));
+  if (RIDER_GLTF[cfg.model]) return ready(RIDER_GLTF[cfg.model]);
+  new T3.GLTFLoader().parse(b64ToBuf(b64), '', (g) => { RIDER_GLTF[cfg.model] = g; ready(g); }, (e) => console.error('rider glb', e));
 }
 function attachModel(w, gltf) {
   const obj = T3.SkeletonUtils.clone(gltf.scene);
   // 滑雪服：MakeHuman 真人模型（Ara 3D Gen 生成）。夹克/裤子换成光滑面料并向外"充气"做出蓬松感，去掉绑带
   const PUFF = { 'Techwear jacket': 0.06, 'Techwear pants': 0.045 };
-  const COLOR = { 'Techwear jacket': 0xd9733b, 'Techwear pants': 0xeef1f4, 'Helmet': 0x16181d, 'Boot shafts': 0x1b1d22, 'Shoes': 0x1b1d22 };
+  const RC = riderCfg();
+  const COLOR = { 'Techwear jacket': RC.jacket, 'Techwear pants': RC.pants, 'Helmet': 0x16181d, 'Boot shafts': 0x1b1d22, 'Shoes': 0x1b1d22 };
   obj.traverse((o) => {
     if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -189,7 +192,7 @@ function attachModel(w, gltf) {
         return nm;
       }
       if (m.name in COLOR) { const h = m.clone(); h.color = new T3.Color(COLOR[m.name]); if (h.map && m.name !== 'Shoes') h.map = null; h.roughness = 0.4; return h; }
-      if (m.name === 'Visor') { const h = m.clone(); h.color = new T3.Color(0xf2a33a); h.metalness = 0.8; h.roughness = 0.12; return h; }
+      if (m.name === 'Visor') { const h = m.clone(); h.color = new T3.Color(RC.visor); h.metalness = 0.8; h.roughness = 0.12; return h; }
       return m;
     });
     o.material = Array.isArray(o.material) ? out : out[0];
@@ -207,7 +210,7 @@ function attachModel(w, gltf) {
   const goggle = new T3.Mesh(new T3.BoxGeometry(1, 1, 1), new T3.MeshStandardMaterial({ color: 0x8fb7ff, roughness: 0.1, metalness: 0.6 }));
   helmet.castShadow = goggle.castShadow = true; helmet.visible = goggle.visible = false; scene.add(helmet, goggle);
   // 宽松滑雪服外层（跟着骨骼走）：裤腿、膝部、夹克下摆、手套——遮住膝/髋关节的硬折角
-  const pantsM = new T3.MeshStandardMaterial({ color: 0xeef1f4, roughness: 0.75 }), jackM = new T3.MeshStandardMaterial({ color: 0xd9733b, roughness: 0.6 }), gloveM = new T3.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.55 });
+  const pantsM = new T3.MeshStandardMaterial({ color: RC.pants, roughness: 0.75 }), jackM = new T3.MeshStandardMaterial({ color: RC.jacket, roughness: 0.6 }), gloveM = new T3.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.55 });
   const cyl = new T3.CylinderGeometry(1, 1, 1, 20, 1, true), sph = new T3.SphereGeometry(1, 20, 14);
   const mk = (g, m) => { const o = new T3.Mesh(g, m); o.castShadow = true; o.frustumCulled = false; scene.add(o); return o; };
   const garb = { thigh: [mk(cyl, pantsM), mk(cyl, pantsM)], shin: [mk(cyl, pantsM), mk(cyl, pantsM)], knee: [mk(sph, pantsM), mk(sph, pantsM)], hipb: [mk(sph, pantsM), mk(sph, pantsM)],
