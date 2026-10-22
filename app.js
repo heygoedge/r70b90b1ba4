@@ -125,13 +125,15 @@ function build() {
   bg.rotateX(-Math.PI / 2); bg.translate(0, -0.012, 0); // 形状 xy → 板 XZ
   { const pa = bg.attributes.position, K0 = L / 2 - 0.2; for (let i = 0; i < pa.count; i++) { const x = pa.getX(i), e = Math.abs(x) - K0; if (e > 0) pa.setY(i, pa.getY(i) + 0.075 * Math.pow(e / 0.21, 2)); } bg.computeVertexNormals(); }
   const board = new T3.Group(); root.add(board);
-  const boardMesh = new T3.Mesh(bg, [mat(0xe2463a, { roughness: 0.45, metalness: 0.15 }), mat(0x23262d, { roughness: 0.5 })]);
+  // 鲸尾女仆配色：板面深海军蓝（同裙子）、板侧亮蓝（同头发）、固定器白底（同围裙）
+  const BC = riderCfg().model === 'whale' ? { deck: 0x1f2f66, side: 0x4f8fe8, base: 0xeef1f6, hb: 0x1f2f66 } : { deck: 0xe2463a, side: 0x23262d, base: 0x1b1e24, hb: 0x2a2e36 };
+  const boardMesh = new T3.Mesh(bg, [mat(BC.deck, { roughness: 0.45, metalness: 0.15 }), mat(BC.side, { roughness: 0.5 })]);
   boardMesh.castShadow = true; boardMesh.receiveShadow = true; board.add(boardMesh);
   // 固定器（底座 + 高背），前脚 +15° / 后脚 −15° 示意
   for (const [x, a] of [[0.27, 15], [-0.27, -15]]) {
     const b = new T3.Group(); b.position.set(x, 0.012, 0); b.rotation.y = a * DEG;
-    const base = new T3.Mesh(new T3.BoxGeometry(0.13, 0.025, 0.26), mat(0x1b1e24, { roughness: 0.6 })); base.position.y = 0.012; base.castShadow = true; b.add(base);
-    const hb = new T3.Mesh(new T3.BoxGeometry(0.11, 0.16, 0.02), mat(0x2a2e36)); hb.position.set(0, 0.09, -0.12 * D.stanceSign); hb.rotation.x = 0.25 * D.stanceSign; hb.castShadow = true; b.add(hb);
+    const base = new T3.Mesh(new T3.BoxGeometry(0.13, 0.025, 0.26), mat(BC.base, { roughness: 0.6 })); base.position.y = 0.012; base.castShadow = true; b.add(base);
+    const hb = new T3.Mesh(new T3.BoxGeometry(0.11, 0.16, 0.02), mat(BC.hb)); hb.position.set(0, 0.09, -0.12 * D.stanceSign); hb.rotation.x = 0.25 * D.stanceSign; hb.castShadow = true; b.add(hb);
     board.add(b);
   }
   // 板头标记 + 刃色条
@@ -209,6 +211,7 @@ function attachModel(w, gltf) {
   const wp = (b) => b.getWorldPosition(new T3.Vector3());
   const leg = wp(B.LeftUpLeg).distanceTo(wp(B.LeftLeg)) + wp(B.LeftLeg).distanceTo(wp(B.LeftFoot));
   obj.scale.multiplyScalar((TH + SH) / leg); obj.updateMatrixWorld(true);
+  const legLen = {}; for (const [sd, S] of [['Left', 'L'], ['Right', 'R']]) legLen[S] = [wp(B[sd + 'UpLeg']).distanceTo(wp(B[sd + 'Leg'])), wp(B[sd + 'Leg']).distanceTo(wp(B[sd + 'Foot'])), B[sd + 'ToeBase'] ? wp(B[sd + 'Foot']).distanceTo(wp(B[sd + 'ToeBase'])) : 0];
   const rest = {}; for (const k in B) if (B[k] && B[k].isBone) rest[k] = B[k].quaternion.clone();
   const restSec = WHALE ? [...B._sec.tail, ...B._sec.skirt, ...B._sec.hair].map((b) => [b, b.quaternion.clone()]) : [];
   // 头盔 + 护目镜（挂在头骨上，跟随转动）
@@ -224,7 +227,7 @@ function attachModel(w, gltf) {
     hem: mk(new T3.CylinderGeometry(1, 1, 1, 24, 1, true), jackM), seat: mk(sph, pantsM), torso: mk(sph, jackM), chest: mk(sph, jackM), uarm: [mk(cyl, jackM), mk(cyl, jackM)], farm: [mk(cyl, jackM), mk(cyl, jackM)], elb: [mk(sph, jackM), mk(sph, jackM)], shd: [mk(sph, jackM), mk(sph, jackM)], collar: mk(cyl, jackM), glove: [mk(sph, gloveM), mk(sph, gloveM)], cuff: [mk(cyl, gloveM), mk(cyl, gloveM)] };
   const headFwd = new T3.Vector3(0, 0, 1).applyQuaternion(obj.getWorldQuaternion(new T3.Quaternion())).applyQuaternion(B.Head.getWorldQuaternion(new T3.Quaternion()).invert()).normalize();
   if (WHALE) for (const g of Object.values(garb)) for (const o of [].concat(g)) o.visible = false;
-  w.model = { obj, B, rest, restSec, headFwd: WHALE ? headFwd : new T3.Vector3(0, 0, 1), helmet, goggle, hs, garb, whale: WHALE };
+  w.model = { obj, B, rest, restSec, legLen, headFwd: WHALE ? headFwd : new T3.Vector3(0, 0, 1), helmet, goggle, hs, garb, whale: WHALE };
   for (const o of [...w.bones, ...Object.values(w.J), ...w.boots]) o.visible = false;
   if (D) { frame(st.t); }
 }
@@ -277,12 +280,23 @@ function driveModel(w, P) {
     aim(B[sd + 'Arm'], B[sd + 'ForeArm'], null, T[S + 'Elbow'].clone().sub(T[S + 'Shoulder']));
     const hand = B[sd + 'Hand'] || B[sd + 'ForeArm'].children.find((c) => c.isBone);
     if (hand) aim(B[sd + 'ForeArm'], hand, null, T[S + 'Wrist'].clone().sub(T[S + 'Elbow']));
-    aim(B[sd + 'UpLeg'], B[sd + 'Leg'], null, T[S + 'Knee'].clone().sub(T[S + 'Hip']));
-    aim(B[sd + 'Leg'], B[sd + 'Foot'], null, T[S + 'Ankle'].clone().sub(T[S + 'Knee']));
     // 脚掌平放在板上，脚尖指向前刃侧（固定器角度 ±15°）
     const front = (S === 'L') === (D.stanceSign > 0);
     const toeDir = new T3.Vector3(0, 0, D.stanceSign).applyAxisAngle(new T3.Vector3(0, 1, 0), (front ? 15 : -15) * DEG * D.stanceSign);
     const toeW = toeDir.transformDirection(w.rider.matrixWorld);
+    if (M.whale) { // 按模型自己的大腿/小腿长度做两段 IK，并把鞋的中点（而不是脚踝）放到板中线上
+      const hip = wp(B[sd + 'UpLeg']), L1 = M.legLen[S][0], L2 = M.legLen[S][1];
+      const ank = T[S + 'Ankle'].clone().sub(toeW.clone().multiplyScalar(M.legLen[S][2] * 0.5));
+      const d = ank.clone().sub(hip); let L = Math.min(d.length(), L1 + L2 - 0.003); const dir = d.normalize();
+      const a = (L1 * L1 - L2 * L2 + L * L) / (2 * L), h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+      const pv = T[S + 'Knee'].clone().sub(hip); const p = pv.sub(dir.clone().multiplyScalar(pv.dot(dir))).normalize();
+      const knee = hip.clone().add(dir.clone().multiplyScalar(a)).add(p.multiplyScalar(h));
+      aim(B[sd + 'UpLeg'], B[sd + 'Leg'], null, knee.clone().sub(hip));
+      aim(B[sd + 'Leg'], B[sd + 'Foot'], null, ank.clone().sub(wp(B[sd + 'Leg'])));
+    } else {
+      aim(B[sd + 'UpLeg'], B[sd + 'Leg'], null, T[S + 'Knee'].clone().sub(T[S + 'Hip']));
+      aim(B[sd + 'Leg'], B[sd + 'Foot'], null, T[S + 'Ankle'].clone().sub(T[S + 'Knee']));
+    }
     if (B[sd + 'ToeBase']) aim(B[sd + 'Foot'], B[sd + 'ToeBase'], null, toeW.add(w.n.clone().multiplyScalar(-0.35)));
   }
   if (M.whale) { // 尾巴、裙摆、头发：随转速和上下颠簸滞后摆动
@@ -475,6 +489,7 @@ function frame(t) {
   const WUP = new T3.Vector3(0, 1, 0);
   if (st.camMode === 'chase') camPos = p.clone().add(trv.clone().multiplyScalar(-4.6)).add(WUP.clone().multiplyScalar(2.6)).add(side.clone().multiplyScalar(0.9));
   else if (st.camMode === 'side') camPos = p.clone().add(side.clone().multiplyScalar(-3.4)).add(WUP.clone().multiplyScalar(1.1)).add(trv.clone().multiplyScalar(0.6));
+  else if (st.camMode === 'feet') camPos = p.clone().add(WUP.clone().multiplyScalar(2.4)).add(trv.clone().multiplyScalar(-1.2)).add(side.clone().multiplyScalar(0.3));
   else if (st.camMode === 'top') camPos = p.clone().add(new T3.Vector3(0, 22, 0.01));
   const target = p.clone().add(n.clone().multiplyScalar(0.6)).add(trv.clone().multiplyScalar(1.2));
   sun.position.copy(p).add(new T3.Vector3(6, 14, 5)); sun.target.position.copy(p);
