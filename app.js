@@ -245,6 +245,20 @@ function driveModel(w, P) {
   const q2 = frameQ(wp(B.LeftArm).sub(wp(B.RightArm)), wp(B.Neck).sub(wp(B.Spine2)), T.LShoulder.clone().sub(T.RShoulder), T.Neck.clone().sub(T.Chest));
   setWorldQ(B.Spine2, q2.multiply(worldQ(B.Spine2)));
   aim(B.Neck, B.Head, null, T.Head.clone().sub(T.Neck));
+  // 头：看行进方向，并提前看向下一个弯（转速 × 0.35 s 预判），绕颈部竖轴扭转，带惯性，限幅 ±60°
+  { const t = st.t, upN = wp(B.Head).sub(wp(B.Neck)).normalize();
+    const lead = (() => { const t0 = Math.max(0, t - 0.12), t1 = Math.min(D.meta.duration - 0.01, t + 0.12); let d = ang(D.bear_travel, t1) - ang(D.bear_travel, t0); d = ((d + 540) % 360 - 180) / (t1 - t0); return Math.max(-50, Math.min(50, d * 0.35)); })();
+    const look = bearingVec(ang(D.bear_travel, t) + lead, w.n);
+    const fw = new T3.Vector3(0, 0, 1).applyQuaternion(worldQ(B.Head));
+    const pf = fw.clone().sub(upN.clone().multiplyScalar(fw.dot(upN))).normalize(), pl = look.clone().sub(upN.clone().multiplyScalar(look.dot(upN))).normalize();
+    let a = Math.atan2(pf.clone().cross(pl).dot(upN), pf.dot(pl)) / DEG;
+    a = smooth('headYaw', Math.max(-60, Math.min(60, a)), t, 0.22);
+    setWorldQ(B.Head, new T3.Quaternion().setFromAxisAngle(upN, a * DEG).multiply(worldQ(B.Head)));
+    // 轻微点头：压低时低头看雪面，伸展时抬头
+    const nod = smooth('headNod', 12 * Math.min(1, Math.abs(num(D.roll, t)) / 60), t, 0.3);
+    const side = upN.clone().cross(pl).normalize();
+    setWorldQ(B.Head, new T3.Quaternion().setFromAxisAngle(side, -nod * DEG).multiply(worldQ(B.Head)));
+  }
   // 3) 手臂、腿：逐节摆动对准
   for (const [sd, S] of [['Left', 'L'], ['Right', 'R']]) {
     aim(B[sd + 'Arm'], B[sd + 'ForeArm'], null, T[S + 'Elbow'].clone().sub(T[S + 'Shoulder']));
