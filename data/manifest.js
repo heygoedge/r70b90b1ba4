@@ -1,1 +1,1 @@
-window.REPLAY_LIST = ['rim_r5', 'lzj_r1'];
+window.REPLAY_LIST = ['rim_r5', 'lzj_r1', 'lzj_r2'];
