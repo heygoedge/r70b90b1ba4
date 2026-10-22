@@ -102,6 +102,22 @@ function build() {
   }
   rb.setAttribute('position', new T3.Float32BufferAttribute(rp, 3)); rb.setAttribute('color', new T3.Float32BufferAttribute(rc, 3));
   const ribbon = new T3.Mesh(rb, new T3.MeshBasicMaterial({ vertexColors: true, side: T3.DoubleSide, transparent: true, opacity: 0.85 })); ribbon.frustumCulled = false; root.add(ribbon);
+  // 扫雪面：每一帧板子（板头↔板尾）在雪面上的位置连成面。刻滑时板头板尾走同一条线 → 只剩细线；
+  // 搓雪/甩尾时板横着往下走 → 扫出宽度 ≈ 板长 × |sin 侧滑角| 的一片（和真实雪面上的搓雪痕一致），越横越宽、越不透明
+  const sw = new T3.BufferGeometry(), sp = [], sc = [];
+  { const HL = 0.72, lift2 = n.clone().multiplyScalar(0.012);
+    const ends = (i) => { const u = bearingVec(D.bear_nose[i], n).multiplyScalar(HL), p = P[i].clone().add(lift2); return [p.clone().add(u), p.clone().sub(u)]; };
+    let [n0, t0] = ends(0);
+    for (let i = 0; i < P.length - 1; i++) {
+      const [n1, t1] = ends(i + 1);
+      const sl = Math.min(1, Math.abs((D.sideslip && D.sideslip[i]) || 0) / 45), a = 0.28 + 0.6 * sl;   // 侧滑越大越显眼
+      const c = new T3.Color(0x8ea4c2).lerp(new T3.Color(0x3f5a85), sl);
+      for (const q of [t0, n0, n1, t0, n1, t1]) { sp.push(q.x, q.y, q.z); sc.push(c.r, c.g, c.b, a); }
+      n0 = n1; t0 = t1;
+    }
+  }
+  sw.setAttribute('position', new T3.Float32BufferAttribute(sp, 3)); sw.setAttribute('color', new T3.Float32BufferAttribute(sc, 4));
+  const sweep = new T3.Mesh(sw, new T3.MeshBasicMaterial({ vertexColors: true, transparent: true, side: T3.DoubleSide, depthWrite: false })); sweep.frustumCulled = false; sweep.renderOrder = 1; root.add(sweep);
   // 每 0.4 s 画一道"板长轴"短线：线和轨迹的夹角就是侧滑
   const tk = [], step = Math.round(0.4 * D.meta.fs);
   for (let i = 0; i < P.length; i += step) {
@@ -109,7 +125,7 @@ function build() {
     tk.push(...p.clone().add(u).toArray(), ...p.clone().sub(u).toArray());
   }
   const tg = new T3.BufferGeometry(); tg.setAttribute('position', new T3.Float32BufferAttribute(tk, 3));
-  const ticks = new T3.LineSegments(tg, new T3.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.55 })); ticks.frustumCulled = false; ticks.visible = !!D.sideslip; root.add(ticks);
+  const ticks = new T3.LineSegments(tg, new T3.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.55 })); ticks.frustumCulled = false; ticks.visible = false; root.add(ticks); // 已由扫雪面替代（边滑边出）
   // GPS 原始点
   if (D.gps && D.gps.length) {
     const gg = new T3.SphereGeometry(0.18, 8, 6), gm = new T3.MeshBasicMaterial({ color: D.meta.gps_ok ? 0x3b6fd8 : 0xb04a4a, transparent: true, opacity: 0.7 });
@@ -158,7 +174,7 @@ function build() {
   const bones = BONES.map(([a, b, m, r]) => { const o = new T3.Mesh(cyl, bm[m]); o.userData = { a, b, r }; rider.add(o); return o; });
   // 靴子
   const boots = [0, 1].map(() => { const o = new T3.Mesh(new T3.BoxGeometry(0.13, 0.12, 0.3), mat(0x2b2f38)); rider.add(o); return o; });
-  world = { root, board, rider, J, bones, boots, aTravel, aNose, n, P, model: null, ribbon, ticks };
+  world = { root, board, rider, J, bones, boots, aTravel, aNose, n, P, model: null, ribbon, ticks, sweep };
   loadRiderModel(world);
   drawTimeline();
 }
@@ -481,7 +497,7 @@ function frame(t) {
   w.aTravel.position.copy(top); w.aTravel.setDirection(bearingVec(bt, n));
   w.aNose.position.copy(top); w.aNose.setDirection(bearingVec(bn, n));
   // 轨迹边滑边出：只画到当前时刻
-  { const [ii] = idxAt(t); w.ribbon.geometry.setDrawRange(0, Math.max(0, ii) * 6); }
+  { const [ii] = idxAt(t); w.ribbon.geometry.setDrawRange(0, Math.max(0, ii) * 6); w.sweep.geometry.setDrawRange(0, Math.max(0, ii) * 6); }
   const tilt = placeBody(t);
   // 镜头
   const trv = bearingVec(bt, n), side = trv.clone().cross(n).normalize();
