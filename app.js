@@ -11,14 +11,18 @@ const qs = new URLSearchParams(location.search);
 const canvas = $('c3d');
 const renderer = new T3.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = T3.PCFSoftShadowMap;
+renderer.outputColorSpace = T3.SRGBColorSpace; renderer.toneMapping = T3.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
 const scene = new T3.Scene();
 scene.background = new T3.Color(0xcfd8e6);
 scene.fog = new T3.Fog(0xcfd8e6, 60, 260);
-const camera = new T3.PerspectiveCamera(50, 1, 0.1, 2000);
+const camera = new T3.PerspectiveCamera(38, 1, 0.05, 2000);
 const controls = new T3.OrbitControls(camera, canvas);
 controls.enableDamping = true;
-scene.add(new T3.HemisphereLight(0xffffff, 0x8899aa, 1.6));
-const sun = new T3.DirectionalLight(0xffffff, 1.6); sun.position.set(30, 60, 20); scene.add(sun);
+scene.add(new T3.HemisphereLight(0xf4f8ff, 0x9aa8bd, 1.25));
+const sun = new T3.DirectionalLight(0xfff6e8, 2.4); sun.position.set(30, 60, 20); scene.add(sun); scene.add(sun.target);
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
+Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 120 });
 
 let D = null, world = null;
 const st = { t: 0, playing: false, rate: 1, last: performance.now(), voff: 0, camMode: 'chase', bodyMode: 'auto' };
@@ -58,7 +62,7 @@ function build() {
   for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) { const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ; pos.push(x, planeY(x, z) - 0.01, z); }
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) { const a = j * (NX + 1) + i; idx.push(a, a + NX + 1, a + 1, a + 1, a + NX + 1, a + NX + 2); }
   g.setAttribute('position', new T3.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
-  root.add(new T3.Mesh(g, mat(0xf4f7fb, { roughness: 0.95 })));
+  const slope = new T3.Mesh(g, mat(0xf7f9fc, { roughness: 0.92 })); slope.receiveShadow = true; root.add(slope);
   const grid = new T3.LineSegments(new T3.WireframeGeometry(g), new T3.LineBasicMaterial({ color: 0xc9d3e2, transparent: true, opacity: 0.55 }));
   grid.position.copy(n.clone().multiplyScalar(0.005)); root.add(grid);
   // 滚落线箭头
@@ -92,13 +96,24 @@ function build() {
     for (const q of D.gps) { const m = new T3.Mesh(gg, gm); m.position.set(q[1], planeY(q[1], q[2]) + 0.15, q[2]); root.add(m); }
   }
 
-  // 雪板：圆头圆尾的挤出形状
+  // 雪板：真实尺寸（1.56×0.27 m），侧切 + 两端翘头 + 固定器
   const L = 1.56, W = 0.27, R = 0.12, sh = new T3.Shape();
-  sh.moveTo(-L / 2 + R, -W / 2); sh.lineTo(L / 2 - R, -W / 2); sh.quadraticCurveTo(L / 2 + 0.02, -W / 2, L / 2 + 0.02, 0); sh.quadraticCurveTo(L / 2 + 0.02, W / 2, L / 2 - R, W / 2);
-  sh.lineTo(-L / 2 + R, W / 2); sh.quadraticCurveTo(-L / 2 - 0.02, W / 2, -L / 2 - 0.02, 0); sh.quadraticCurveTo(-L / 2 - 0.02, -W / 2, -L / 2 + R, -W / 2);
-  const bg = new T3.ExtrudeGeometry(sh, { depth: 0.02, bevelEnabled: false }); bg.rotateX(-Math.PI / 2); bg.translate(0, -0.01, 0); // 形状 xy → 板 XZ
+  const SC = 0.012; // 腰部侧切
+  sh.moveTo(-L / 2 + R, -W / 2); sh.quadraticCurveTo(0, -W / 2 + SC * 2, L / 2 - R, -W / 2); sh.quadraticCurveTo(L / 2 + 0.03, -W / 2, L / 2 + 0.03, 0); sh.quadraticCurveTo(L / 2 + 0.03, W / 2, L / 2 - R, W / 2);
+  sh.quadraticCurveTo(0, W / 2 - SC * 2, -L / 2 + R, W / 2); sh.quadraticCurveTo(-L / 2 - 0.03, W / 2, -L / 2 - 0.03, 0); sh.quadraticCurveTo(-L / 2 - 0.03, -W / 2, -L / 2 + R, -W / 2);
+  const bg = new T3.ExtrudeGeometry(sh, { depth: 0.018, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.006, bevelSegments: 2, curveSegments: 24 });
+  bg.rotateX(-Math.PI / 2); bg.translate(0, -0.012, 0); // 形状 xy → 板 XZ
+  { const pa = bg.attributes.position, K0 = L / 2 - 0.2; for (let i = 0; i < pa.count; i++) { const x = pa.getX(i), e = Math.abs(x) - K0; if (e > 0) pa.setY(i, pa.getY(i) + 0.075 * Math.pow(e / 0.21, 2)); } bg.computeVertexNormals(); }
   const board = new T3.Group(); root.add(board);
-  board.add(new T3.Mesh(bg, mat(0x1d2433)));
+  const boardMesh = new T3.Mesh(bg, [mat(0xe2463a, { roughness: 0.45, metalness: 0.15 }), mat(0x23262d, { roughness: 0.5 })]);
+  boardMesh.castShadow = true; boardMesh.receiveShadow = true; board.add(boardMesh);
+  // 固定器（底座 + 高背），前脚 +15° / 后脚 −15° 示意
+  for (const [x, a] of [[0.27, 15], [-0.27, -15]]) {
+    const b = new T3.Group(); b.position.set(x, 0.012, 0); b.rotation.y = a * DEG;
+    const base = new T3.Mesh(new T3.BoxGeometry(0.13, 0.025, 0.26), mat(0x1b1e24, { roughness: 0.6 })); base.position.y = 0.012; base.castShadow = true; b.add(base);
+    const hb = new T3.Mesh(new T3.BoxGeometry(0.11, 0.16, 0.02), mat(0x2a2e36)); hb.position.set(0, 0.09, -0.12 * D.stanceSign); hb.rotation.x = 0.25 * D.stanceSign; hb.castShadow = true; b.add(hb);
+    board.add(b);
+  }
   // 板头标记 + 刃色条
   const nose = new T3.Mesh(new T3.SphereGeometry(0.035, 12, 8), new T3.MeshBasicMaterial({ color: 0xff3355 })); nose.position.set(L / 2 - 0.05, 0.02, 0); board.add(nose);
   const toeBar = new T3.Mesh(new T3.BoxGeometry(L * 0.8, 0.012, 0.02), new T3.MeshBasicMaterial({ color: 0xe0732f })); toeBar.position.set(0, 0.012, (W / 2 - 0.015) * D.stanceSign); board.add(toeBar);
@@ -121,8 +136,108 @@ function build() {
   const bones = BONES.map(([a, b, m, r]) => { const o = new T3.Mesh(cyl, bm[m]); o.userData = { a, b, r }; rider.add(o); return o; });
   // 靴子
   const boots = [0, 1].map(() => { const o = new T3.Mesh(new T3.BoxGeometry(0.13, 0.12, 0.3), mat(0x2b2f38)); rider.add(o); return o; });
-  world = { root, board, rider, J, bones, boots, aTravel, aNose, n, P };
+  world = { root, board, rider, J, bones, boots, aTravel, aNose, n, P, model: null };
+  loadRiderModel(world);
   drawTimeline();
+}
+
+// ---------------------------------------------------------------- 真人蒙皮模型（three.js 官方示例 Michelle，Mixamo 骨骼）
+// 做法同 Trackk：关节点先按"双脚钉板 + 两段 IK + 默认站姿 + 测得的倾斜"解出来，再把每根骨头从 T-pose 转到对应方向。
+let RIDER_GLTF = null;
+function b64ToBuf(b64) { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
+function loadRiderModel(w) {
+  if (!window.RIDER_GLB || !T3.GLTFLoader) return;
+  const ready = (g) => { if (world !== w) return; attachModel(w, g); };
+  if (RIDER_GLTF) return ready(RIDER_GLTF);
+  new T3.GLTFLoader().parse(b64ToBuf(window.RIDER_GLB), '', (g) => { RIDER_GLTF = g; ready(g); }, (e) => console.error('rider glb', e));
+}
+function attachModel(w, gltf) {
+  const obj = T3.SkeletonUtils.clone(gltf.scene);
+  // 换装：按每个顶点主要绑定的骨骼分区上色（夹克 / 裤子 / 靴子 / 手套 / 皮肤），保留真实人体外形
+  const PART = (nm) => /Hand|Thumb|Index|Middle|Ring|Pinky/.test(nm) ? 'glove' : /Foot|Toe/.test(nm) ? 'boot' : /UpLeg|Leg/.test(nm) ? 'pants' : /Head|Neck|Eye/.test(nm) ? 'head' : 'jacket';
+  const COL = { jacket: new T3.Color(0xd9733b), pants: new T3.Color(0xcfc6ac), boot: new T3.Color(0x23262d), glove: new T3.Color(0x2b2f38), head: new T3.Color(0xc79a7c) };
+  obj.traverse((o) => {
+    if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+    if (o.isSkinnedMesh) {
+      const g = o.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, n = si.count, cols = new Float32Array(n * 3), bones = o.skeleton.bones;
+      for (let i = 0; i < n; i++) { let bi = 0, bw = -1; for (let c = 0; c < 4; c++) { const w = sw.getComponent(i, c); if (w > bw) { bw = w; bi = si.getComponent(i, c); } }
+        const col = COL[PART(bones[bi].name)]; cols[i * 3] = col.r; cols[i * 3 + 1] = col.g; cols[i * 3 + 2] = col.b; }
+      g.setAttribute('color', new T3.BufferAttribute(cols, 3));
+      // 头发收进头盔：头部顶点离头骨中心超过半径的，拉回到半径内（绑定姿态的网格空间里做）
+      const hi = bones.findIndex((x) => /Head$/.test(x.name)), ti = bones.findIndex((x) => /HeadTop_End/.test(x.name));
+      if (hi >= 0) {
+        const hc = new T3.Vector3().setFromMatrixPosition(o.skeleton.boneInverses[hi].clone().invert());
+        const ht = ti >= 0 ? new T3.Vector3().setFromMatrixPosition(o.skeleton.boneInverses[ti].clone().invert()) : hc.clone().add(new T3.Vector3(0, 18, 0));
+        const ctr = hc.clone().lerp(ht, 0.45), R = hc.distanceTo(ht) * 0.5, pa = g.attributes.position, v = new T3.Vector3();
+        for (let i = 0; i < n; i++) { let bi = 0, bw = -1; for (let c = 0; c < 4; c++) { const w = sw.getComponent(i, c); if (w > bw) { bw = w; bi = si.getComponent(i, c); } }
+          if (bi !== hi && bi !== ti) continue; v.fromBufferAttribute(pa, i); const d = v.distanceTo(ctr); if (d > R) { v.sub(ctr).multiplyScalar(R / d).add(ctr); pa.setXYZ(i, v.x, v.y, v.z); } }
+        pa.needsUpdate = true; g.computeVertexNormals();
+      }
+      o.material = new T3.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.0 });
+    }
+  });
+  const B = {}; obj.traverse((o) => { if (o.isBone) B[o.name.replace('mixamorig:', '').replace('mixamorig', '')] = o; });
+  scene.add(obj); obj.updateMatrixWorld(true);
+  // 缩放：模型髋→踝长度 对齐到我们解算用的 TH+SH
+  const wp = (b) => b.getWorldPosition(new T3.Vector3());
+  const leg = wp(B.LeftUpLeg).distanceTo(wp(B.LeftLeg)) + wp(B.LeftLeg).distanceTo(wp(B.LeftFoot));
+  obj.scale.multiplyScalar((TH + SH) / leg); obj.updateMatrixWorld(true);
+  const rest = {}; for (const k in B) rest[k] = B[k].quaternion.clone();
+  // 头盔 + 护目镜（挂在头骨上，跟随转动）
+  const hs = wp(B.Head).distanceTo(wp(B.HeadTop_End || B.Head)) || 0.2;
+  const helmet = new T3.Mesh(new T3.SphereGeometry(1, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), mat(0x1c1f26, { roughness: 0.35 }));
+  const goggle = new T3.Mesh(new T3.BoxGeometry(1, 1, 1), new T3.MeshStandardMaterial({ color: 0x8fb7ff, roughness: 0.1, metalness: 0.6 }));
+  helmet.castShadow = goggle.castShadow = true; scene.add(helmet, goggle);
+  w.model = { obj, B, rest, helmet, goggle, hs };
+  for (const o of [...w.bones, ...Object.values(w.J), ...w.boots]) o.visible = false;
+  if (D) { frame(st.t); }
+}
+const _q = new T3.Quaternion(), _q2 = new T3.Quaternion(), _m = new T3.Matrix4();
+function worldQ(o) { return o.getWorldQuaternion(new T3.Quaternion()); }
+function setWorldQ(bone, qw) { const pq = worldQ(bone.parent).invert(); bone.quaternion.copy(pq.multiply(qw)); bone.updateMatrixWorld(true); }
+function aim(bone, child, target, dirWanted) { // 摆动：让 bone→child 指向 dirWanted
+  const a = bone.getWorldPosition(new T3.Vector3()), b = child.getWorldPosition(new T3.Vector3());
+  const cur = b.sub(a).normalize(), d = dirWanted.clone().normalize();
+  const dq = new T3.Quaternion().setFromUnitVectors(cur, d);
+  setWorldQ(bone, dq.multiply(worldQ(bone)));
+}
+function frameQ(xr, yr, xt, yt) { // 把 (xr,yr) 基 转到 (xt,yt) 基 的世界旋转
+  const basis = (x, y) => { const Y = y.clone().normalize(), Z = x.clone().cross(Y).normalize(), X = Y.clone().cross(Z); return new T3.Matrix4().makeBasis(X, Y, Z); };
+  const mr = basis(xr, yr), mt = basis(xt, yt);
+  return new T3.Quaternion().setFromRotationMatrix(mt.multiply(mr.invert()));
+}
+function driveModel(w, P) {
+  const M = w.model, B = M.B, wp = (b) => b.getWorldPosition(new T3.Vector3());
+  const T = {}; for (const k in P) if (P[k] && P[k].isVector3) T[k] = w.rider.localToWorld(P[k].clone());
+  for (const k in M.rest) B[k].quaternion.copy(M.rest[k]);
+  M.obj.position.set(0, 0, 0); M.obj.quaternion.identity(); M.obj.updateMatrixWorld(true);
+  // 1) 骨盆：髋连线 + 脊柱方向
+  const qh = frameQ(wp(B.LeftUpLeg).sub(wp(B.RightUpLeg)), wp(B.Spine1).sub(wp(B.Hips)), T.LHip.clone().sub(T.RHip), T.Spine.clone().sub(T.Hips));
+  setWorldQ(B.Hips, qh.multiply(worldQ(B.Hips)));
+  M.obj.position.add(T.Hips.clone().sub(wp(B.Hips))); M.obj.updateMatrixWorld(true);
+  // 2) 脊柱分两节弯，胸椎再用肩线定扭转
+  aim(B.Spine, B.Spine1, null, T.Chest.clone().sub(T.Hips));
+  aim(B.Spine1, B.Spine2, null, T.Neck.clone().sub(T.Spine));
+  const q2 = frameQ(wp(B.LeftArm).sub(wp(B.RightArm)), wp(B.Neck).sub(wp(B.Spine2)), T.LShoulder.clone().sub(T.RShoulder), T.Neck.clone().sub(T.Chest));
+  setWorldQ(B.Spine2, q2.multiply(worldQ(B.Spine2)));
+  aim(B.Neck, B.Head, null, T.Head.clone().sub(T.Neck));
+  // 3) 手臂、腿：逐节摆动对准
+  for (const [sd, S] of [['Left', 'L'], ['Right', 'R']]) {
+    aim(B[sd + 'Arm'], B[sd + 'ForeArm'], null, T[S + 'Elbow'].clone().sub(T[S + 'Shoulder']));
+    aim(B[sd + 'ForeArm'], B[sd + 'Hand'], null, T[S + 'Wrist'].clone().sub(T[S + 'Elbow']));
+    aim(B[sd + 'UpLeg'], B[sd + 'Leg'], null, T[S + 'Knee'].clone().sub(T[S + 'Hip']));
+    aim(B[sd + 'Leg'], B[sd + 'Foot'], null, T[S + 'Ankle'].clone().sub(T[S + 'Knee']));
+    // 脚掌平放在板上，脚尖指向前刃侧（固定器角度 ±15°）
+    const front = (S === 'L') === (D.stanceSign > 0);
+    const toeDir = new T3.Vector3(0, 0, D.stanceSign).applyAxisAngle(new T3.Vector3(0, 1, 0), (front ? 15 : -15) * DEG * D.stanceSign);
+    const toeW = toeDir.transformDirection(w.rider.matrixWorld);
+    if (B[sd + 'ToeBase']) aim(B[sd + 'Foot'], B[sd + 'ToeBase'], null, toeW.add(w.n.clone().multiplyScalar(-0.35)));
+  }
+  // 4) 头盔/护目镜跟随头骨
+  const hq = worldQ(B.Head), hp = wp(B.Head), r = 0.125;
+  const up = new T3.Vector3(0, 1, 0).applyQuaternion(hq), fw = new T3.Vector3(0, 0, 1).applyQuaternion(hq);
+  M.helmet.position.copy(hp).add(up.clone().multiplyScalar(0.075)).add(fw.clone().multiplyScalar(-0.01)); M.helmet.quaternion.copy(hq); M.helmet.scale.setScalar(r);
+  M.goggle.position.copy(hp).add(up.clone().multiplyScalar(0.085)).add(fw.clone().multiplyScalar(0.105)); M.goggle.quaternion.copy(hq); M.goggle.scale.set(r * 1.35, r * 0.38, r * 0.3);
 }
 
 // ---------------------------------------------------------------- 小人姿态（板局部系里算关节点）
@@ -144,7 +259,9 @@ function solveBody(t) {
   // 比力方向（脚上 IMU 测的，板系）：稳态下身体重心落在这条线上 → 用来定整体倾斜（估算）
   let f = vec(D.f_loc, t); if (f.length() < 0.3) f.set(0, 1, 0); f.normalize();
   const tilt = Math.acos(Math.max(-1, Math.min(1, f.dot(Y))));
-  if (tilt > 55 * DEG) f = Y.clone().lerp(f, 55 * DEG / tilt).normalize();
+  if (tilt > 45 * DEG) f = Y.clone().lerp(f, 45 * DEG / tilt).normalize();
+  // 折叠（angulation）：上身比板面法向更"立"一些——取比力方向与坡面法向之间偏向比力 65% 的方向（估算，单板常见折叠 15–25°）
+  if (world && world.board) { const nl = world.n.clone().applyQuaternion(world.board.quaternion.clone().invert()).normalize(); f = f.clone().lerp(nl, 0.35).normalize(); }
   const mode = currentBodyMode();
   let up, chestQ = null;
   if (mode === 'chest') {
@@ -161,7 +278,7 @@ function solveBody(t) {
   const LK = legIK(LH, LA, pole.clone().add(leftSide.clone().multiplyScalar(0.25)));
   const RK = legIK(RH, RA, pole.clone().add(leftSide.clone().multiplyScalar(-0.25)));
   // 躯干：默认站姿 = 上方向 + 向前（脚尖侧）弯 18°，肩线朝板头打开 15°
-  let U = up.clone().applyAxisAngle(lead, 18 * DEG * s).normalize();
+  let U = up.clone().applyAxisAngle(lead, 10 * DEG * s).normalize();
   let W = leftSide.clone().applyAxisAngle(up, 15 * DEG * s).normalize();
   if (chestQ) { U = new T3.Vector3(0, 1, 0).applyAxisAngle(lead, 18 * DEG * s).applyQuaternion(chestQ); W = leftSide.clone().applyAxisAngle(Y, 15 * DEG * s).applyQuaternion(chestQ); }
   const Fw = U.clone().cross(W).multiplyScalar(-s).normalize(); // 胸口朝向
@@ -187,6 +304,8 @@ const Yaxis = new T3.Vector3(0, 1, 0);
 const CORNERS = []; for (const x of [-0.78, -0.5, 0, 0.5, 0.78]) for (const z of [-0.135, 0.135]) CORNERS.push(new T3.Vector3(x, -0.01, z));
 function placeBody(t) {
   const P = solveBody(t), w = world;
+  w.rider.updateMatrixWorld(true);
+  if (w.model) driveModel(w, P);
   for (const k in w.J) w.J[k].position.copy(P[k]);
   for (const o of w.bones) {
     const a = P[o.userData.a], b = P[o.userData.b], d = b.clone().sub(a), L = d.length();
@@ -222,10 +341,11 @@ function frame(t) {
   // 镜头
   const trv = bearingVec(bt, n), side = trv.clone().cross(n).normalize();
   let camPos = null;
-  if (st.camMode === 'chase') camPos = p.clone().add(trv.clone().multiplyScalar(-4.2)).add(n.clone().multiplyScalar(1.9));
-  else if (st.camMode === 'side') camPos = p.clone().add(side.clone().multiplyScalar(-4.5)).add(n.clone().multiplyScalar(1.4)).add(trv.clone().multiplyScalar(0.8));
+  if (st.camMode === 'chase') camPos = p.clone().add(trv.clone().multiplyScalar(-2.9)).add(n.clone().multiplyScalar(1.25)).add(side.clone().multiplyScalar(0.6));
+  else if (st.camMode === 'side') camPos = p.clone().add(side.clone().multiplyScalar(-3.2)).add(n.clone().multiplyScalar(1.0)).add(trv.clone().multiplyScalar(0.6));
   else if (st.camMode === 'top') camPos = p.clone().add(new T3.Vector3(0, 22, 0.01));
-  const target = p.clone().add(n.clone().multiplyScalar(0.8));
+  const target = p.clone().add(n.clone().multiplyScalar(0.75));
+  sun.position.copy(p).add(new T3.Vector3(6, 14, 5)); sun.target.position.copy(p);
   if (camPos) { camera.position.lerp(camPos, st.snap ? 1 : 0.12); controls.target.lerp(target, st.snap ? 1 : 0.2); st.snap = false; }
   else { const dlt = target.clone().sub(controls.target); controls.target.add(dlt); camera.position.add(dlt); }
   // 仪表
