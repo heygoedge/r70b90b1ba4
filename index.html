@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>HeyGo 3D 滑行回放原型</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { --bg:#0f1420; --panel:#171e2d; --line:#2a3447; --txt:#e6ebf5; --dim:#8d97ab; --toe:#f08a4b; --heel:#2fb5a3; --warn:#e6b84a; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--txt); font:13px/1.45 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+  #app { display:grid; grid-template-rows:auto 1fr auto; height:100vh; }
+  header { display:flex; gap:12px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 8px 0 0; font-weight:600; }
+  select, button, input[type=range] { background:var(--panel); color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:4px 8px; font:inherit; }
+  button { cursor:pointer; }
+  .tag { padding:2px 8px; border-radius:10px; font-size:12px; border:1px solid var(--line); color:var(--dim); }
+  .tag.est { border-color:var(--warn); color:var(--warn); }
+  .tag.ok { border-color:var(--heel); color:var(--heel); }
+  main { display:flex; min-height:0; }
+  #vidwrap { flex:0 0 auto; display:flex; flex-direction:column; background:#000; border-right:1px solid var(--line); }
+  #vidwrap.hidden { display:none; }
+  #vid { height:100%; max-height:calc(100vh - 250px); background:#000; }
+  #vidctl { padding:6px 8px; background:var(--panel); font-size:12px; color:var(--dim); }
+  #vidctl input { width:160px; vertical-align:middle; }
+  #view { position:relative; flex:1; min-width:0; }
+  #c3d { width:100%; height:100%; display:block; }
+  #gauges { position:absolute; top:10px; left:10px; display:grid; grid-template-columns:repeat(2, 128px); gap:6px; }
+  .g { background:rgba(23,30,45,.88); border:1px solid var(--line); border-radius:8px; padding:6px 9px; }
+  .g .k { color:var(--dim); font-size:11px; }
+  .g .v { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .g .u { font-size:12px; color:var(--dim); margin-left:2px; }
+  .g .s { font-size:11px; color:var(--dim); }
+  #legend { position:absolute; right:10px; top:10px; width:330px; max-height:calc(100% - 20px); overflow:auto; background:rgba(23,30,45,.9); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12px; }
+  #legend h3 { margin:2px 0 6px; font-size:13px; }
+  #legend ul { margin:0; padding-left:16px; }
+  #legend li { margin:2px 0; }
+  #legend details { margin-top:6px; color:var(--dim); }
+  #legend .m { color:var(--heel); } #legend .e { color:var(--warn); }
+  footer { border-top:1px solid var(--line); padding:6px 10px 8px; }
+  #ctl { display:flex; gap:8px; align-items:center; margin-bottom:4px; }
+  #tl { width:100%; height:110px; display:block; cursor:pointer; }
+  #tlabel { color:var(--dim); font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>HeyGo 3D 滑行回放 · 原型</h1>
+    <select id="ds"></select>
+    <span id="title" class="tag"></span>
+    <span id="bodytag" class="tag est"></span>
+    <span id="trajtag" class="tag"></span>
+    <label class="tag">镜头 <select id="cam"><option value="chase">跟随（身后）</option><option value="side">跟随（侧面）</option><option value="top">俯视</option><option value="free">自由</option></select></label>
+    <label class="tag">身体 <select id="bodymode"><option value="auto">自动</option><option value="lean">估算（站姿+比力倾斜）</option><option value="chest">手机当胸口驱动</option></select></label>
+  </header>
+  <main>
+    <div id="vidwrap" class="hidden">
+      <video id="vid" muted playsinline preload="auto"></video>
+      <div id="vidctl">视频偏移 <input id="voff" type="range" min="-3" max="3" step="0.05" value="0"> <span id="voffv">0.00s</span>
+        <div id="vnote"></div></div>
+    </div>
+    <div id="view">
+      <canvas id="c3d"></canvas>
+      <div id="gauges">
+        <div class="g"><div class="k">速度</div><div><span class="v" id="gSpd">-</span><span class="u">km/h</span></div><div class="s" id="gSpdS"></div></div>
+        <div class="g"><div class="k">立刃角（板 Roll）</div><div><span class="v" id="gRoll">-</span><span class="u">°</span></div><div class="s" id="gEdge"></div></div>
+        <div class="g"><div class="k">侧滑角 β（板头 vs 行进方向）</div><div><span class="v" id="gSlip">-</span><span class="u">°</span></div><div class="s" id="gSlipS"></div></div>
+        <div class="g"><div class="k">当前弯（算法切分）</div><div><span class="v" id="gTurn" style="font-size:16px">-</span></div><div class="s" id="gTurnS"></div></div>
+      </div>
+      <div id="legend"></div>
+    </div>
+  </main>
+  <footer>
+    <div id="ctl">
+      <button id="play">▶ 播放</button>
+      <select id="rate"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select>
+      <span id="tlabel"></span>
+    </div>
+    <canvas id="tl"></canvas>
+  </footer>
+</div>
+<script src="lib/three.bundle.js"></script>
+<script src="data/manifest.js"></script>
+<script>
+// 按清单加载数据（每个数据集一个 <script>，这样 file:// 直接双击也能打开）
+(function () {
+  for (const n of window.REPLAY_LIST) document.write('<script src="data/' + n + '.js"><\/script>');
+})();
+</script>
+<script src="app.js"></script>
+</body>
+</html>
