@@ -173,29 +173,26 @@ function loadRiderModel(w) {
 }
 function attachModel(w, gltf) {
   const obj = T3.SkeletonUtils.clone(gltf.scene);
-  // 换装：按每个顶点主要绑定的骨骼分区上色（夹克 / 裤子 / 靴子 / 手套 / 皮肤），保留真实人体外形
-  const PART = (nm) => /Hand|Thumb|Index|Middle|Ring|Pinky/.test(nm) ? 'glove' : /Foot|Toe/.test(nm) ? 'boot' : /UpLeg|Leg/.test(nm) ? 'pants' : /Head|Neck|Eye/.test(nm) ? 'head' : 'jacket';
-  const COL = { jacket: new T3.Color(0xd9733b), pants: new T3.Color(0xcfc6ac), boot: new T3.Color(0x23262d), glove: new T3.Color(0x2b2f38), head: new T3.Color(0x1c1f26) };
+  // 滑雪服：MakeHuman 真人模型（Ara 3D Gen 生成）。夹克/裤子换成光滑面料并向外"充气"做出蓬松感，去掉绑带
+  const PUFF = { 'Techwear jacket': 0.022, 'Techwear pants': 0.018 };
+  const COLOR = { 'Techwear jacket': 0xd9733b, 'Techwear pants': 0xcfc6ac, 'Helmet': 0x16181d, 'Boot shafts': 0x1b1d22, 'Shoes': 0x1b1d22 };
   obj.traverse((o) => {
     if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
-    if (o.isSkinnedMesh) {
-      const g = o.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, n = si.count, cols = new Float32Array(n * 3), bones = o.skeleton.bones;
-      for (let i = 0; i < n; i++) { let bi = 0, bw = -1; for (let c = 0; c < 4; c++) { const w = sw.getComponent(i, c); if (w > bw) { bw = w; bi = si.getComponent(i, c); } }
-        const col = COL[PART(bones[bi].name)]; cols[i * 3] = col.r; cols[i * 3 + 1] = col.g; cols[i * 3 + 2] = col.b; }
-      g.setAttribute('color', new T3.BufferAttribute(cols, 3));
-      // 头发收进头盔：头部顶点离头骨中心超过半径的，拉回到半径内（绑定姿态的网格空间里做）
-      const hi = bones.findIndex((x) => /Head$/.test(x.name)), ti = bones.findIndex((x) => /HeadTop_End/.test(x.name));
-      if (hi >= 0 && window.RIDER_COLLAPSE_HAIR) {
-        const hc = new T3.Vector3().setFromMatrixPosition(o.skeleton.boneInverses[hi].clone().invert());
-        const ht = ti >= 0 ? new T3.Vector3().setFromMatrixPosition(o.skeleton.boneInverses[ti].clone().invert()) : hc.clone().add(new T3.Vector3(0, 18, 0));
-        const ctr = hc.clone().lerp(ht, 0.45), R = hc.distanceTo(ht) * 0.5, pa = g.attributes.position, v = new T3.Vector3();
-        for (let i = 0; i < n; i++) { let bi = 0, bw = -1; for (let c = 0; c < 4; c++) { const w = sw.getComponent(i, c); if (w > bw) { bw = w; bi = si.getComponent(i, c); } }
-          if (bi !== hi && bi !== ti) continue; v.fromBufferAttribute(pa, i); const d = v.distanceTo(ctr); if (d > R) { v.sub(ctr).multiplyScalar(R / d).add(ctr); pa.setXYZ(i, v.x, v.y, v.z); } }
-        pa.needsUpdate = true; g.computeVertexNormals();
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    const out = mats.map((m) => {
+      if (!m) return m;
+      if (m.name === 'Straps') { const h = m.clone(); h.visible = false; return h; }
+      if (m.name in PUFF) {
+        const nm = new T3.MeshStandardMaterial({ color: COLOR[m.name], roughness: 0.62, metalness: 0.0 }); nm.name = m.name;
+        const d = PUFF[m.name];
+        nm.onBeforeCompile = (sh) => { sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n transformed += normalize(objectNormal) * ${d.toFixed(4)};`); };
+        return nm;
       }
-      const isVisor = /visor/i.test(o.name) || /Visor/.test((o.material && o.material.name) || '');
-      o.material = isVisor ? new T3.MeshStandardMaterial({ color: 0x6f8fd8, roughness: 0.12, metalness: 0.7 }) : new T3.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.0 });
-    }
+      if (m.name in COLOR) { const h = m.clone(); h.color = new T3.Color(COLOR[m.name]); if (h.map && m.name !== 'Shoes') h.map = null; h.roughness = 0.4; return h; }
+      if (m.name === 'Visor') { const h = m.clone(); h.color = new T3.Color(0xf2a33a); h.metalness = 0.8; h.roughness = 0.12; return h; }
+      return m;
+    });
+    o.material = Array.isArray(o.material) ? out : out[0];
   });
   const B = {}; obj.traverse((o) => { if (o.isBone) B[o.name.replace('mixamorig:', '').replace('mixamorig', '')] = o; });
   scene.add(obj); obj.updateMatrixWorld(true);
