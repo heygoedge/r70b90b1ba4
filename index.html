@@ -2,80 +2,167 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>HeyGo 3D 滑行回放原型</title>
+<title>HeyGo 3D 滑行回放</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-  :root { --bg:#0f1420; --panel:#171e2d; --line:#2a3447; --txt:#e6ebf5; --dim:#8d97ab; --toe:#f08a4b; --heel:#2fb5a3; --warn:#e6b84a; }
-  * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--txt); font:13px/1.45 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
-  #app { display:grid; grid-template-rows:auto 1fr auto; height:100vh; }
-  header { display:flex; gap:12px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:15px; margin:0 8px 0 0; font-weight:600; }
-  select, button, input[type=range] { background:var(--panel); color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:4px 8px; font:inherit; }
-  button { cursor:pointer; }
-  .tag { padding:2px 8px; border-radius:10px; font-size:12px; border:1px solid var(--line); color:var(--dim); }
-  .tag.est { border-color:var(--warn); color:var(--warn); }
-  .tag.ok { border-color:var(--heel); color:var(--heel); }
+  :root {
+    --bg:#070c12; --panel:rgba(13,20,29,.82); --panel2:#0f1822; --line:rgba(226,240,255,.10); --line2:rgba(226,240,255,.18);
+    --txt:#eef4f8; --dim:#8c9aa8; --dim2:#5d6b78; --acc:#c6ff3d; --heel:#2fd1b8; --toe:#ff8a3d; --warn:#ffbd69; --red:#ff4d6a;
+    --mono:"SF Mono","JetBrains Mono",Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--txt); font:13px/1.45 -apple-system,"PingFang SC","Helvetica Neue",sans-serif; -webkit-font-smoothing:antialiased; }
+  #app { display:grid; grid-template-rows:56px 1fr 196px; height:100vh; }
+  /* ---------- 顶栏 ---------- */
+  header { display:flex; align-items:center; gap:14px; padding:0 18px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#0c141d,#070c12); }
+  .brand { display:flex; align-items:baseline; gap:10px; margin-right:6px; }
+  .brand b { font-size:19px; font-weight:800; letter-spacing:-.04em; font-style:italic; }
+  .brand b i { color:var(--acc); font-style:italic; }
+  .brand span { font:700 10px var(--mono); letter-spacing:.22em; color:var(--dim); text-transform:uppercase; }
+  .sel { position:relative; }
+  select { appearance:none; background:var(--panel2); color:var(--txt); border:1px solid var(--line2); border-radius:999px; padding:7px 30px 7px 14px; font:inherit; cursor:pointer; }
+  .sel::after { content:'▾'; position:absolute; right:12px; top:7px; color:var(--dim); pointer-events:none; }
+  .seg { display:inline-flex; gap:2px; padding:3px; border:1px solid var(--line2); border-radius:999px; background:var(--panel2); }
+  .seg button { border:0; background:transparent; color:var(--dim); font:700 11px var(--mono); letter-spacing:.06em; padding:6px 11px; border-radius:999px; cursor:pointer; }
+  .seg button.on { background:var(--acc); color:#071016; }
+  .pill { display:inline-flex; align-items:center; gap:6px; font:700 10px var(--mono); letter-spacing:.1em; text-transform:uppercase; padding:5px 10px; border-radius:999px; border:1px solid var(--line2); color:var(--dim); white-space:nowrap; }
+  .pill.est { color:var(--warn); border-color:rgba(255,189,105,.45); }
+  .pill.ok { color:var(--heel); border-color:rgba(47,209,184,.45); }
+  .dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+  .sp { flex:1; }
+  .btn { border:1px solid var(--line2); background:transparent; color:var(--txt); border-radius:999px; padding:7px 13px; font:700 11px var(--mono); letter-spacing:.08em; cursor:pointer; }
+  .btn:hover { border-color:var(--acc); color:var(--acc); }
+  /* ---------- 主区 ---------- */
   main { display:flex; min-height:0; }
-  #vidwrap { flex:0 0 auto; display:flex; flex-direction:column; background:#000; border-right:1px solid var(--line); }
+  #vidwrap { position:relative; flex:0 0 auto; background:#000; border-right:1px solid var(--line); display:flex; flex-direction:column; }
   #vidwrap.hidden { display:none; }
-  #vid { height:100%; max-height:calc(100vh - 250px); background:#000; }
-  #vidctl { padding:6px 8px; background:var(--panel); font-size:12px; color:var(--dim); }
-  #vidctl input { width:160px; vertical-align:middle; }
+  #vid { display:block; height:100%; max-height:calc(100vh - 56px - 196px - 38px); background:#000; }
+  .vtag { position:absolute; left:10px; top:10px; font:700 10px var(--mono); letter-spacing:.16em; color:#fff; background:rgba(0,0,0,.45); padding:4px 8px; border-radius:4px; }
+  .vov { position:absolute; left:10px; right:10px; top:40px; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
+  .vov .row { display:flex; justify-content:space-between; }
+  .vov .c { text-shadow:0 1px 10px rgba(0,0,0,.7); }
+  .vov .c small { display:block; font:700 9px var(--mono); letter-spacing:.14em; color:rgba(255,255,255,.75); }
+  .vov .c b { font-size:26px; font-weight:800; letter-spacing:-.03em; }
+  .vov .c em { font-style:normal; font-size:11px; color:rgba(255,255,255,.8); margin-left:2px; }
+  #vidctl { height:38px; display:flex; align-items:center; gap:8px; padding:0 10px; background:var(--panel2); border-top:1px solid var(--line); font:11px var(--mono); color:var(--dim); }
+  #vidctl input { width:120px; accent-color:var(--acc); }
+  #vnote { display:none; }
   #view { position:relative; flex:1; min-width:0; }
   #c3d { width:100%; height:100%; display:block; }
-  #gauges { position:absolute; top:10px; left:10px; display:grid; grid-template-columns:repeat(2, 128px); gap:6px; }
-  .g { background:rgba(23,30,45,.88); border:1px solid var(--line); border-radius:8px; padding:6px 9px; }
-  .g .k { color:var(--dim); font-size:11px; }
-  .g .v { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
-  .g .u { font-size:12px; color:var(--dim); margin-left:2px; }
-  .g .s { font-size:11px; color:var(--dim); }
-  #legend { position:absolute; right:10px; top:10px; width:330px; max-height:calc(100% - 20px); overflow:auto; background:rgba(23,30,45,.9); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12px; }
-  #legend h3 { margin:2px 0 6px; font-size:13px; }
-  #legend ul { margin:0; padding-left:16px; }
-  #legend li { margin:2px 0; }
-  #legend details { margin-top:6px; color:var(--dim); }
-  #legend .m { color:var(--heel); } #legend .e { color:var(--warn); }
-  footer { border-top:1px solid var(--line); padding:6px 10px 8px; }
-  #ctl { display:flex; gap:8px; align-items:center; margin-bottom:4px; }
-  #tl { width:100%; height:110px; display:block; cursor:pointer; }
-  #tlabel { color:var(--dim); font-variant-numeric:tabular-nums; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
+  .k { font:700 9px var(--mono); letter-spacing:.18em; color:var(--dim); text-transform:uppercase; display:flex; justify-content:space-between; align-items:center; }
+  .badge { font:700 8px var(--mono); letter-spacing:.1em; padding:2px 5px; border-radius:3px; }
+  .badge.m { color:#061014; background:var(--heel); } .badge.e { color:#140c02; background:var(--warn); }
+  .big { font-size:30px; font-weight:800; letter-spacing:-.04em; font-variant-numeric:tabular-nums; line-height:1.05; }
+  .big small { font-size:12px; font-weight:600; color:var(--dim); margin-left:3px; letter-spacing:0; }
+  .sub { font-size:11px; color:var(--dim); margin-top:2px; }
+  #hud { position:absolute; left:14px; top:14px; display:grid; grid-template-columns:repeat(3,150px); gap:8px; }
+  #hud .card { padding:10px 12px; }
+  #hud svg { display:block; margin:4px auto 0; }
+  .bar { height:4px; border-radius:2px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:7px; }
+  .bar i { display:block; height:100%; background:var(--acc); border-radius:2px; width:0; }
+  #hud2 { position:absolute; left:14px; top:206px; display:grid; grid-template-columns:repeat(3,150px); gap:8px; }
+  #hud2 .card { padding:8px 12px; }
+  #hud2 .big { font-size:20px; }
+  #turncard { position:absolute; right:14px; top:14px; width:250px; padding:14px; }
+  #turncard .tt { display:flex; align-items:baseline; gap:8px; margin:4px 0 8px; }
+  #turncard .tt b { font-size:34px; font-weight:800; letter-spacing:-.04em; }
+  #turncard .tt span { font-weight:700; }
+  .kv { display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; }
+  .kv div small { display:block; font:700 9px var(--mono); letter-spacing:.12em; color:var(--dim2); }
+  .kv div b { font-size:15px; font-variant-numeric:tabular-nums; }
+  .phase { display:flex; gap:2px; margin-top:10px; }
+  .phase i { flex:1; height:5px; border-radius:2px; background:rgba(255,255,255,.08); }
+  .phase i.on { background:var(--acc); }
+  .phlab { display:flex; justify-content:space-between; font:700 8px var(--mono); letter-spacing:.1em; color:var(--dim2); margin-top:4px; }
+  #mapcard { position:absolute; right:14px; bottom:14px; width:250px; padding:10px 12px 12px; }
+  #minimap { width:226px; height:200px; display:block; margin-top:6px; }
+  #srccard { position:absolute; left:14px; bottom:14px; padding:8px 12px; font-size:11px; color:var(--dim); display:flex; gap:12px; align-items:center; }
+  #drawer { position:absolute; top:0; right:0; bottom:0; width:420px; transform:translateX(100%); transition:transform .25s; background:#0c131c; border-left:1px solid var(--line2); z-index:20; overflow:auto; padding:18px; font-size:12px; }
+  #drawer.open { transform:none; }
+  #drawer h3 { margin:0 0 4px; font-size:16px; } #drawer ul { padding-left:16px; } #drawer li { margin:4px 0; }
+  #drawer .m { color:var(--heel); font-weight:700; } #drawer .e { color:var(--warn); font-weight:700; }
+  #drawer details { margin-top:8px; color:var(--dim); } #drawer summary { cursor:pointer; color:var(--txt); }
+  /* ---------- 底部 ---------- */
+  footer { border-top:1px solid var(--line); background:#0a1018; display:grid; grid-template-rows:44px 28px 116px; padding:0 18px 8px; min-height:0; overflow:hidden; }
+  #ctl { display:flex; align-items:center; gap:12px; }
+  #play { width:34px; height:34px; border-radius:50%; border:0; background:var(--acc); color:#071016; font-size:14px; cursor:pointer; }
+  #tlabel { font:12px var(--mono); color:var(--dim); font-variant-numeric:tabular-nums; }
+  #tlabel b { color:var(--txt); }
+  #chips { display:flex; gap:3px; align-items:center; overflow:hidden; }
+  .chip { flex:1; min-width:0; height:22px; border-radius:5px; border:1px solid transparent; font:700 10px var(--mono); display:flex; align-items:center; justify-content:center; cursor:pointer; color:#071016; opacity:.55; white-space:nowrap; overflow:hidden; }
+  .chip.heel { background:var(--heel); } .chip.toe { background:var(--toe); } .chip.on { opacity:1; box-shadow:0 0 0 2px #fff inset; }
+  .chip.gap { background:transparent; border-color:var(--line); color:var(--dim2); cursor:default; }
+  #tl { width:100%; height:116px; display:block; cursor:pointer; }
+  #rate { padding:6px 26px 6px 12px; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <h1>HeyGo 3D 滑行回放 · 原型</h1>
-    <select id="ds"></select>
-    <span id="title" class="tag"></span>
-    <span id="bodytag" class="tag est"></span>
-    <span id="trajtag" class="tag"></span>
-    <label class="tag">镜头 <select id="cam"><option value="chase">跟随（身后）</option><option value="side">跟随（侧面）</option><option value="top">俯视</option><option value="free">自由</option></select></label>
-    <label class="tag">身体 <select id="bodymode"><option value="auto">自动</option><option value="lean">估算（站姿+比力倾斜）</option><option value="chest">手机当胸口驱动</option></select></label>
+    <div class="brand"><b>Hey<i>Go</i></b><span>3D Replay</span></div>
+    <div class="sel"><select id="ds"></select></div>
+    <span id="title" class="pill" style="display:none"></span>
+    <span id="bodytag" class="pill est"></span>
+    <span id="trajtag" class="pill"></span>
+    <span class="sp"></span>
+    <span class="pill"><span class="dot" style="background:var(--heel)"></span>实测</span>
+    <span class="pill"><span class="dot" style="background:var(--warn)"></span>估算</span>
+    <div class="seg" id="camseg"><button data-v="chase" class="on">身后</button><button data-v="side">侧面</button><button data-v="top">俯视</button><button data-v="free">自由</button></div>
+    <select id="cam" style="display:none"><option value="chase">chase</option><option value="side">side</option><option value="top">top</option><option value="free">free</option></select>
+    <div class="sel"><select id="bodymode"><option value="auto">身体：自动</option><option value="lean">身体：估算</option><option value="chest">身体：手机驱动</option></select></div>
+    <button class="btn" id="srcbtn">数据来源</button>
   </header>
   <main>
     <div id="vidwrap" class="hidden">
       <video id="vid" muted playsinline preload="auto"></video>
-      <div id="vidctl">视频偏移 <input id="voff" type="range" min="-3" max="3" step="0.05" value="0"> <span id="voffv">0.00s</span>
-        <div id="vnote"></div></div>
+      <div class="vtag">CAMERA · 实拍</div>
+      <div class="vov">
+        <div class="row"><div class="c"><small>SPEED</small><b id="vSpd">-</b><em>km/h</em></div><div class="c" style="text-align:right"><small>EDGE</small><b id="vEdge">-</b><em>°</em></div></div>
+      </div>
+      <div id="vidctl">同步偏移 <input id="voff" type="range" min="-3" max="3" step="0.05" value="0"> <span id="voffv">0.00s</span><span class="sp"></span><span id="vclock"></span><div id="vnote"></div></div>
     </div>
     <div id="view">
       <canvas id="c3d"></canvas>
-      <div id="gauges">
-        <div class="g"><div class="k">速度</div><div><span class="v" id="gSpd">-</span><span class="u">km/h</span></div><div class="s" id="gSpdS"></div></div>
-        <div class="g"><div class="k">立刃角（板 Roll）</div><div><span class="v" id="gRoll">-</span><span class="u">°</span></div><div class="s" id="gEdge"></div></div>
-        <div class="g"><div class="k">侧滑角 β（板头 vs 行进方向）</div><div><span class="v" id="gSlip">-</span><span class="u">°</span></div><div class="s" id="gSlipS"></div></div>
-        <div class="g"><div class="k">当前弯（算法切分）</div><div><span class="v" id="gTurn" style="font-size:16px">-</span></div><div class="s" id="gTurnS"></div></div>
+      <div id="hud">
+        <div class="card"><div class="k">速度 <span class="badge m">实测</span></div><div class="big" id="gSpd">-<small>km/h</small></div><div class="bar"><i id="gSpdBar"></i></div><div class="sub" id="gSpdS"></div></div>
+        <div class="card"><div class="k">立刃角 <span class="badge m">实测</span></div>
+          <svg id="dialEdge" width="126" height="70" viewBox="0 0 126 70"></svg>
+          <div class="big" style="text-align:center;font-size:24px" id="gRoll">-</div><div class="sub" id="gEdge" style="text-align:center"></div></div>
+        <div class="card"><div class="k">侧滑角 <span class="badge e">估算</span></div>
+          <svg id="dialSlip" width="126" height="70" viewBox="0 0 126 70"></svg>
+          <div class="big" style="text-align:center;font-size:24px" id="gSlip">-</div><div class="sub" id="gSlipS" style="text-align:center"></div></div>
       </div>
-      <div id="legend"></div>
+      <div id="hud2">
+        <div class="card"><div class="k">左脚 / 右脚立刃</div><div class="big" id="gFeet">-</div></div>
+        <div class="card"><div class="k">比力 G</div><div class="big" id="gG">-</div><div class="bar"><i id="gGBar"></i></div></div>
+        <div class="card"><div class="k">身体倾斜 <span class="badge e">估算</span></div><div class="big" id="gTilt">-</div></div>
+      </div>
+      <div id="turncard" class="card">
+        <div class="k">当前弯 · 主链路切分</div>
+        <div class="tt"><b id="gTurn">—</b><span id="gTurnEdge"></span></div>
+        <div class="kv">
+          <div><small>技术</small><b id="tTech">—</b></div><div><small>最大立刃</small><b id="tMax">—</b></div>
+          <div><small>时长</small><b id="tDur">—</b></div><div><small>最大侧滑</small><b id="tSlip">—</b></div>
+          <div><small>平均速度</small><b id="tSpd">—</b></div><div><small>趟内进度</small><b id="tIdx">—</b></div>
+        </div>
+        <div class="phase" id="phase"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="phlab"><span>入弯</span><span>建刃</span><span>弯顶</span><span>释放</span><span>出弯</span></div>
+        <div class="sub" id="gTurnS" style="margin-top:8px"></div>
+      </div>
+      <div id="mapcard" class="card"><div class="k">俯视轨迹 · 边滑边画 <span class="badge e">估算</span></div><canvas id="minimap"></canvas></div>
+      <div id="srccard" class="card"><span>轨迹 <b style="color:var(--heel)">━</b> 后刃 <b style="color:var(--toe)">━</b> 前刃</span><span><b style="color:#2f6fe4">▲</b> 行进方向 <b style="color:var(--red)">▲</b> 板头</span><span>灰短线 = 板长轴</span></div>
+      <div id="drawer"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b style="font-size:13px">数据来源</b><button class="btn" id="srcclose">关闭</button></div><div id="legend"></div></div>
     </div>
   </main>
   <footer>
     <div id="ctl">
-      <button id="play">▶ 播放</button>
-      <select id="rate"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select>
-      <span id="tlabel"></span>
+      <button id="play">▶</button>
+      <div class="sel"><select id="rate"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></div>
+      <span id="tlabel"></span><span class="sp"></span>
+      <span class="pill" id="blkpill"></span>
     </div>
+    <div id="chips"></div>
     <canvas id="tl"></canvas>
   </footer>
 </div>
@@ -83,10 +170,7 @@
 <script src="lib/rider_glb.js"></script>
 <script src="data/manifest.js"></script>
 <script>
-// 按清单加载数据（每个数据集一个 <script>，这样 file:// 直接双击也能打开）
-(function () {
-  for (const n of window.REPLAY_LIST) document.write('<script src="data/' + n + '.js"><\/script>');
-})();
+(function () { for (const n of window.REPLAY_LIST) document.write('<script src="data/' + n + '.js"><\/script>'); })();
 </script>
 <script src="app.js"></script>
 </body>

@@ -39,6 +39,10 @@ function vec(arr, t) { const [i, a] = idxAt(t); return v3(arr[i]).lerp(v3(arr[i 
 function quat(arr, t) { const [i, a] = idxAt(t); const q0 = new T3.Quaternion(...arr[i]); const q1 = new T3.Quaternion(...arr[i + 1]); return q0.slerp(q1, a); }
 function bearingVec(b, n) { const v = new T3.Vector3(Math.sin(b * DEG), 0, -Math.cos(b * DEG)); return v.sub(n.clone().multiplyScalar(v.dot(n))).normalize(); }
 function planeY(x, z) { const c = D.meta.plane_coef; return c.a * x + c.b * (-z) + c.c; }
+// 雪面起伏（模拟压雪后的颠簸）：几组不同方向、2–6 m 波长的正弦叠加，总幅度约 ±8 cm
+const BUMPS = [[0.0, 2.3, 0.035, 0.3], [1.1, 3.4, 0.03, 1.7], [2.2, 5.6, 0.025, 2.9], [0.6, 1.7, 0.012, 4.1], [2.8, 2.9, 0.018, 5.3]];
+function bump(x, z) { let h = 0; for (const [a, wl, amp, ph] of BUMPS) { const k = 2 * Math.PI / wl; h += amp * Math.sin(k * (x * Math.cos(a) + z * Math.sin(a)) + ph); } return h; }
+function groundY(x, z) { return planeY(x, z) + bump(x, z); }
 function mat(color, opts = {}) { return new T3.MeshStandardMaterial(Object.assign({ color, roughness: 0.7, metalness: 0.05 }, opts)); }
 function edgeColor(roll, k = 1) {
   const a = Math.min(1, Math.abs(roll) / 45) * k;
@@ -57,12 +61,12 @@ function build() {
   clearWorld();
   const root = new T3.Group(); scene.add(root);
   const n = v3(D.meta.plane_normal_three).normalize();
-  const P = D.pos.map((p, i) => new T3.Vector3(p[0], D.plane_y[i], p[2]));
+  const P = D.pos.map((p, i) => new T3.Vector3(p[0], D.plane_y[i] + bump(p[0], p[2]), p[2]));
   // 坡面：按轨迹包围盒铺一块带网格的平面（平面方程来自轨迹+气压高度拟合）
   const xs = P.map((p) => p.x), zs = P.map((p) => p.z);
   const x0 = Math.min(...xs) - 40, x1 = Math.max(...xs) + 40, z0 = Math.min(...zs) - 40, z1 = Math.max(...zs) + 40;
-  const NX = 60, NZ = 60, g = new T3.BufferGeometry(), pos = [], idx = [];
-  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) { const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ; pos.push(x, planeY(x, z) - 0.01, z); }
+  const NX = 220, NZ = 220, g = new T3.BufferGeometry(), pos = [], idx = [];
+  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) { const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ; pos.push(x, groundY(x, z) - 0.01, z); }
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) { const a = j * (NX + 1) + i; idx.push(a, a + NX + 1, a + 1, a + 1, a + NX + 1, a + NX + 2); }
   g.setAttribute('position', new T3.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
   const snowTex = (() => { const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256; const c = cv.getContext('2d'); c.fillStyle = '#f6f8fb'; c.fillRect(0, 0, 256, 256);
@@ -73,6 +77,14 @@ function build() {
   const slope = new T3.Mesh(g, mat(0xffffff, { roughness: 0.92, map: snowTex })); slope.receiveShadow = true; root.add(slope);
   const grid = new T3.LineSegments(new T3.WireframeGeometry(g), new T3.LineBasicMaterial({ color: 0xc9d3e2, transparent: true, opacity: 0.0 }));
   grid.position.copy(n.clone().multiplyScalar(0.005)); root.add(grid);
+  // 坡道两侧竖直标杆（世界竖直方向），一眼看出坡度；间隔 8 m
+  { const fb0 = bearingVec(D.meta.fall_bearing, n), sd = fb0.clone().cross(new T3.Vector3(0, 1, 0)).normalize();
+    const c0 = P[0].clone(), cN = P[P.length - 1].clone(), L0 = cN.clone().sub(c0).dot(fb0) + 40;
+    const lat = P.map((q) => q.clone().sub(c0).dot(sd)); const lmin = Math.min(...lat) - 12, lmax = Math.max(...lat) + 12;
+    const pg = new T3.CylinderGeometry(0.035, 0.035, 1.6, 8), pm1 = mat(0x2f6fe4), pm2 = mat(0xe2463a);
+    for (let d = -20; d < L0; d += 8) for (const [l, m] of [[lmin, pm1], [lmax, pm2]]) {
+      const q = c0.clone().add(fb0.clone().multiplyScalar(d)).add(sd.clone().multiplyScalar(l)); q.y = groundY(q.x, q.z) + 0.8;
+      const pole = new T3.Mesh(pg, m); pole.position.copy(q); pole.castShadow = true; root.add(pole); } }
   // 滚落线箭头
   const fb = D.meta.fall_bearing, mid = P[Math.floor(P.length / 2)];
   const fall = bearingVec(fb, n);
@@ -259,6 +271,15 @@ function legIK(hip, ankle, pole) {
   const p = pole.clone().sub(dir.clone().multiplyScalar(pole.dot(dir))).normalize();
   return hip.clone().add(dir.multiplyScalar(a)).add(p.multiplyScalar(h));
 }
+// 二阶惯性（临界阻尼）：让身体各部分有一点滞后和回弹，不像木偶那样逐帧瞬变；拖动时间轴时直接重置
+const SM = {};
+function smooth(key, x, t, tau) {
+  const s0 = SM[key]; if (!s0 || Math.abs(t - s0.t) > 0.3 || st.snap) { SM[key] = { t, x, v: 0 }; return x; }
+  const dt = t - s0.t; if (dt <= 0) return s0.x;
+  const w = 2 / tau, steps = Math.max(1, Math.ceil(dt / 0.01)), h = dt / steps;
+  for (let i = 0; i < steps; i++) { const a = w * w * (x - s0.x) - 2 * w * s0.v; s0.v += a * h; s0.x += s0.v * h; }
+  s0.t = t; return s0.x;
+}
 function solveBody(t) {
   const s = D.stanceSign;                         // regular=+1：左脚在板头侧、面朝 +Z
   const X = new T3.Vector3(1, 0, 0), Y = new T3.Vector3(0, 1, 0), F = new T3.Vector3(0, 0, s);
@@ -287,7 +308,10 @@ function solveBody(t) {
   } else up = f;
   // 骨盆：沿"上方向"抬 0.78 m，略向后坐（脚跟侧）
   const pelvisQ = chestQ ? new T3.Quaternion().slerp(chestQ, 0.35) : new T3.Quaternion();
-  const crouch = 0.13 * ea + 0.05 * Math.min(1, Math.max(0, gmag - 1)) - 0.03 * (1 - ea);   // 弯顶压低，换刃时伸展
+  // 颠簸吸收：板跟着雪面起伏，骨盆只跟随其中的低频部分（膝盖吃掉高频）
+  let bAbs = 0; { const pn = vec(D.pos, t), bn = bump(pn.x, pn.z); let acc = 0, k = 0; for (let j = 1; j <= 6; j++) { const tt = Math.max(0, t - j * 0.07); const pj = vec(D.pos, tt); acc += bump(pj.x, pj.z); k++; } bAbs = bn - acc / k; }
+  let crouch = 0.13 * ea + 0.05 * Math.min(1, Math.max(0, gmag - 1)) - 0.03 * (1 - ea) + Math.max(-0.05, Math.min(0.08, bAbs));   // 弯顶压低，换刃时伸展
+  crouch = smooth('crouch', crouch, t, 0.12);
   const P0 = footMid.clone().add(up.clone().multiplyScalar(0.80 - crouch)).add(F.clone().multiplyScalar(-0.05 - 0.06 * ea * Math.sign(edgeNow) * s));
   const hips = chestQ ? footMid.clone().add(P0.clone().sub(footMid).applyQuaternion(pelvisQ)) : P0;
   const hipAxis = leftSide.clone().applyQuaternion(pelvisQ);
@@ -298,7 +322,7 @@ function solveBody(t) {
   // 躯干：默认站姿 = 上方向 + 向前（脚尖侧）弯 18°，肩线朝板头打开 15°
   const lean = chestQ ? 6 : 10 + 22 * ea;                      // 估算模式：压低时上身前屈更多；手机模式前屈由实测给
   let U = up.clone().applyAxisAngle(lead, lean * DEG * s).normalize();
-  const twist = Math.max(-28, Math.min(28, -wr * 0.16)) + 10 * Math.sign(edgeNext - edgeNow) * Math.min(1, Math.abs(edgeNext - edgeNow) / 25) * (Math.abs(edgeNow) < 15 ? 1 : 0);
+  const twist = smooth('twist', Math.max(-28, Math.min(28, -wr * 0.16)) + 10 * Math.sign(edgeNext - edgeNow) * Math.min(1, Math.abs(edgeNext - edgeNow) / 25) * (Math.abs(edgeNow) < 15 ? 1 : 0), t, 0.18);
   let W = leftSide.clone().applyAxisAngle(up, (15 + twist) * DEG * s).normalize();
   if (chestQ) { U = U.applyQuaternion(chestQ).normalize(); W = W.applyQuaternion(chestQ).normalize(); } // 胸口手机的实测转动叠加在动态站姿上
   const Fw = U.clone().cross(W).multiplyScalar(-s).normalize(); // 胸口朝向
@@ -307,7 +331,7 @@ function solveBody(t) {
   const LS = neck.clone().add(W.clone().multiplyScalar(0.19)).add(U.clone().multiplyScalar(-0.05));
   const RS = neck.clone().add(W.clone().multiplyScalar(-0.19)).add(U.clone().multiplyScalar(-0.05));
   // 手臂：没有传感器，跟胸走的默认平衡姿势（前手指向板头、后手略后）
-  const armUp = 0.08 + 0.10 * ea, sw = Math.max(-1, Math.min(1, -wr / 120));
+  const armUp = smooth('armUp', 0.08 + 0.10 * ea, t, 0.25), sw = smooth('sw', Math.max(-1, Math.min(1, -wr / 120)), t, 0.3);
   const LE = LS.clone().add(U.clone().multiplyScalar(-0.2 + armUp * 0.5)).add(W.clone().multiplyScalar(0.14 + 0.04 * sw)).add(Fw.clone().multiplyScalar(0.06 + 0.06 * sw));
   const LW = LE.clone().add(U.clone().multiplyScalar(-0.08 + armUp)).add(W.clone().multiplyScalar(0.2)).add(Fw.clone().multiplyScalar(0.1 + 0.08 * sw));
   const RE = RS.clone().add(U.clone().multiplyScalar(-0.22 + armUp * 0.4)).add(W.clone().multiplyScalar(-0.12 - 0.05 * sw)).add(Fw.clone().multiplyScalar(0.05 - 0.07 * sw));
@@ -345,7 +369,7 @@ function placeBody(t) {
 // ---------------------------------------------------------------- 每帧
 function frame(t) {
   const w = world, n = w.n;
-  const p = vec(D.pos, t); p.y = num(D.plane_y, t);
+  const p = vec(D.pos, t); p.y = num(D.plane_y, t) + bump(p.x, p.z);
   const roll = num(D.roll, t);
   const q = quat(D.q_board, t);
   w.board.quaternion.copy(q);
@@ -364,63 +388,132 @@ function frame(t) {
   // 镜头
   const trv = bearingVec(bt, n), side = trv.clone().cross(n).normalize();
   let camPos = null;
-  if (st.camMode === 'chase') camPos = p.clone().add(trv.clone().multiplyScalar(-4.6)).add(n.clone().multiplyScalar(2.3)).add(side.clone().multiplyScalar(0.9));
-  else if (st.camMode === 'side') camPos = p.clone().add(side.clone().multiplyScalar(-3.2)).add(n.clone().multiplyScalar(1.0)).add(trv.clone().multiplyScalar(0.6));
+  const WUP = new T3.Vector3(0, 1, 0);
+  if (st.camMode === 'chase') camPos = p.clone().add(trv.clone().multiplyScalar(-4.6)).add(WUP.clone().multiplyScalar(2.6)).add(side.clone().multiplyScalar(0.9));
+  else if (st.camMode === 'side') camPos = p.clone().add(side.clone().multiplyScalar(-3.4)).add(WUP.clone().multiplyScalar(1.1)).add(trv.clone().multiplyScalar(0.6));
   else if (st.camMode === 'top') camPos = p.clone().add(new T3.Vector3(0, 22, 0.01));
   const target = p.clone().add(n.clone().multiplyScalar(0.6)).add(trv.clone().multiplyScalar(1.2));
   sun.position.copy(p).add(new T3.Vector3(6, 14, 5)); sun.target.position.copy(p);
   if (camPos) { camera.position.lerp(camPos, st.snap ? 1 : 0.12); controls.target.lerp(target, st.snap ? 1 : 0.2); st.snap = false; }
   else { const dlt = target.clone().sub(controls.target); controls.target.add(dlt); camera.position.add(dlt); }
-  // 仪表
-  const spd = num(D.speed, t) * 3.6;
-  $('gSpd').textContent = spd.toFixed(1);
-  $('gSpdS').textContent = D.meta.gps_ok ? 'GPS + 脚 IMU 融合' : '主链路 IMU 速度模型';
-  $('gRoll').textContent = Math.abs(roll).toFixed(0);
-  const edge = Math.abs(roll) < 3 ? '平板' : roll > 0 ? '后刃' : '前刃';
-  $('gEdge').innerHTML = `<b style="color:${roll > 0 ? 'var(--heel)' : 'var(--toe)'}">${edge}</b> · 身体倾斜 ${tilt.toFixed(0)}°（${currentBodyMode() === 'chest' ? '手机' : '估算'}）`;
-  if (D.sideslip) {
-    const slip = num(D.sideslip, t), sw = D.switch && D.switch[idxAt(t)[0]];
-    $('gSlip').textContent = (slip > 0 ? '+' : '') + slip.toFixed(0);
-    $('gSlipS').textContent = sw ? '板尾在前（switch）' : slip > 0 ? '板头偏向行进方向右侧' : '板头偏向行进方向左侧';
-  } else { $('gSlip').textContent = '不可用'; $('gSlipS').textContent = '室内无 GPS：轨迹沿板航向积分，侧滑按定义=0，不编'; }
-  const tu = D.turns.find((x) => t >= x.t0 && t < x.t1);
-  $('gTurn').textContent = tu ? `${tu.id.replace('turn', 'T')} · ${tu.edge === 'heel' ? '后刃' : '前刃'}` : '—';
-  $('gTurnS').textContent = tu ? `${tu.tech === 'carving' ? '走刃' : tu.tech === 'skidding' ? '搓雪' : tu.tech || ''} · 最大立刃 ${tu.max_roll}° ${tu.status !== 'valid' ? '(' + tu.status + ')' : ''}` : '';
-  $('tlabel').textContent = `${t.toFixed(2)} / ${D.meta.duration.toFixed(1)} s · ${new Date((D.meta.t0_epoch + t) * 1000 + 8 * 3600e3).toISOString().slice(11, 22)} 北京时间`;
+  hud(t, roll, tilt);
 }
 
 // ---------------------------------------------------------------- 时间轴
+const C = { heel: '#2fd1b8', toe: '#ff8a3d', acc: '#c6ff3d', dim: '#8c9aa8', dim2: '#5d6b78', line: 'rgba(226,240,255,.10)' };
+function turnStats(tu) {
+  let mx = 0, sp = 0, k = 0; const i0 = Math.max(0, Math.floor(tu.t0 * D.meta.fs)), i1 = Math.min(D.t.length - 1, Math.ceil(tu.t1 * D.meta.fs));
+  for (let i = i0; i <= i1; i++) { if (D.sideslip) mx = Math.max(mx, Math.abs(D.sideslip[i])); sp += D.speed[i]; k++; }
+  return { slip: mx, spd: k ? sp / k * 3.6 : 0, dur: tu.t1 - tu.t0 };
+}
+function buildChips() {
+  const box = $('chips'); box.innerHTML = ''; const dur = D.meta.duration;
+  const T = D.turns.filter((x) => x.t1 > 0 && x.t0 < dur);
+  let last = 0;
+  T.forEach((tu, k) => {
+    if (tu.t0 - last > 0.6) { const g = document.createElement('div'); g.className = 'chip gap'; g.style.flex = String(tu.t0 - last); g.textContent = '直滑'; box.appendChild(g); }
+    const c = document.createElement('div'); c.className = 'chip ' + (tu.edge === 'heel' ? 'heel' : 'toe'); c.style.flex = String(Math.max(0.3, Math.min(dur, tu.t1) - Math.max(0, tu.t0)));
+    c.textContent = `${tu.id.replace('turn', 'T')} ${tu.edge === 'heel' ? '后' : '前'}`; c.title = `${tu.id} · 最大立刃 ${tu.max_roll}°`;
+    c.onclick = () => seek(Math.max(0, tu.t0) + 0.05); c.dataset.id = tu.id; box.appendChild(c); last = tu.t1;
+  });
+  if (dur - last > 0.6) { const g = document.createElement('div'); g.className = 'chip gap'; g.style.flex = String(dur - last); g.textContent = '直滑/减速'; box.appendChild(g); }
+}
 function drawTimeline() {
   const c = $('tl'), r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   c.width = r.width * dpr; c.height = r.height * dpr;
   const g = c.getContext('2d', { willReadFrequently: true }); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const W = r.width, H = r.height, dur = D.meta.duration, X = (t) => 40 + (W - 50) * t / dur;
-  g.clearRect(0, 0, W, H); g.font = '11px -apple-system, PingFang SC'; g.fillStyle = '#8d97ab';
-  // 弯带
-  for (const tu of D.turns) { g.fillStyle = tu.edge === 'heel' ? 'rgba(47,181,163,.55)' : 'rgba(240,138,75,.55)'; g.fillRect(X(Math.max(0, tu.t0)), 2, Math.max(1, X(Math.min(dur, tu.t1)) - X(Math.max(0, tu.t0)) - 1), 10); }
-  for (const b of D.blocks) { g.fillStyle = '#8d97ab'; g.fillText(`${b.scene === 'carving' ? '走刃块' : b.scene === 'skidding' ? '搓雪块' : b.scene || ''}`, X(Math.max(0, b.t0)) + 2, 24); }
-  // 视频覆盖
-  if (D.meta.video && st.vdur) { const a = D.meta.video.t0_epoch - D.meta.t0_epoch - st.voff; g.fillStyle = 'rgba(120,140,255,.35)'; g.fillRect(X(Math.max(0, a)), 13, Math.max(0, X(Math.min(dur, a + st.vdur)) - X(Math.max(0, a))), 3); }
-  const y0 = 66, sc = 0.55;
-  g.strokeStyle = '#2a3447'; g.beginPath(); g.moveTo(40, y0); g.lineTo(W - 10, y0); g.stroke();
-  g.fillStyle = '#8d97ab'; g.fillText('立刃', 4, y0 - 26); if (D.sideslip) g.fillText('侧滑', 4, y0 + 30);
-  // 立刃（上=后刃）
-  g.lineWidth = 1.5; g.strokeStyle = '#c5cedf'; g.beginPath();
-  D.roll.forEach((v, i) => { const x = X(D.t[i]), y = y0 - v * sc; i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
-  // 侧滑
-  g.lineWidth = 1; g.strokeStyle = '#e6b84a'; g.beginPath();
-  (D.sideslip || []).forEach((v, i) => { const x = X(D.t[i]), y = y0 - Math.max(-60, Math.min(60, v)) * 0.6; i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
-  for (let s = 0; s <= dur; s += 5) { g.fillStyle = '#5e6a80'; g.fillText(`${s}s`, X(s) - 6, H - 2); }
-  st.tlX = X;
+  const W = r.width, H = r.height, dur = D.meta.duration, L = 64, X = (t) => L + (W - L - 6) * t / dur;
+  g.clearRect(0, 0, W, H); g.font = '700 9px SF Mono, Menlo, monospace';
+  const lanes = [['立刃', 0.42], ['侧滑', 0.26], ['速度', 0.24]];
+  let y = 2;
+  const lane = (name, h) => { const y0 = y, hh = (H - 16) * h; y += hh + 3; g.fillStyle = C.dim2; g.fillText(name, 4, y0 + 11); g.strokeStyle = C.line; g.strokeRect(L, y0, W - L - 6, hh); return [y0, hh]; };
+  // 立刃：上=后刃（青），下=前刃（橙）面积
+  { const [y0, hh] = lane(...lanes[0]), mid = y0 + hh / 2, sc = hh / 2 / 80;
+    for (const sgn of [1, -1]) { g.beginPath(); g.moveTo(X(0), mid); D.roll.forEach((v, i) => g.lineTo(X(D.t[i]), mid - (sgn > 0 ? Math.max(0, v) : Math.min(0, v)) * sc)); g.lineTo(X(dur), mid); g.closePath(); g.fillStyle = sgn > 0 ? 'rgba(47,209,184,.55)' : 'rgba(255,138,61,.55)'; g.fill(); }
+    g.fillStyle = C.dim2; g.fillText('后刃', W - 40, y0 + 11); g.fillText('前刃', W - 40, y0 + hh - 4); }
+  { const [y0, hh] = lane(...lanes[1]), mid = y0 + hh / 2, sc = hh / 2 / 45;
+    g.strokeStyle = 'rgba(226,240,255,.12)'; g.beginPath(); g.moveTo(L, mid); g.lineTo(W - 6, mid); g.stroke();
+    if (D.sideslip) { g.strokeStyle = '#ffbd69'; g.lineWidth = 1.3; g.beginPath(); D.sideslip.forEach((v, i) => { const yy = mid - Math.max(-45, Math.min(45, v)) * sc; i ? g.lineTo(X(D.t[i]), yy) : g.moveTo(X(D.t[i]), yy); }); g.stroke(); } }
+  { const [y0, hh] = lane(...lanes[2]), mx = Math.max(...D.speed) * 1.1;
+    g.strokeStyle = C.acc; g.lineWidth = 1.3; g.beginPath(); D.speed.forEach((v, i) => { const yy = y0 + hh - v / mx * hh; i ? g.lineTo(X(D.t[i]), yy) : g.moveTo(X(D.t[i]), yy); }); g.stroke();
+    g.fillStyle = C.dim2; g.fillText(`${(mx * 3.6).toFixed(0)}km/h`, W - 56, y0 + 10); }
+  g.fillStyle = C.dim2; for (let s2 = 0; s2 <= dur; s2 += 5) g.fillText(`${s2}s`, X(s2) - 6, H - 2);
+  if (D.meta.video && st.vdur) { const a = D.meta.video.t0_epoch - D.meta.t0_epoch - st.voff; g.fillStyle = 'rgba(120,150,255,.5)'; g.fillRect(X(Math.max(0, a)), 0, Math.max(0, X(Math.min(dur, a + st.vdur)) - X(Math.max(0, a))), 2); }
+  st.tlX = X; st.tlL = L;
   st.tlImg = g.getImageData(0, 0, c.width, c.height);
 }
 function drawCursor() {
   const c = $('tl'), g = c.getContext('2d', { willReadFrequently: true }); if (!st.tlImg) return;
   g.putImageData(st.tlImg, 0, 0);
   const dpr = window.devicePixelRatio || 1; g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const x = st.tlX(st.t); g.strokeStyle = '#ff3355'; g.lineWidth = 2; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, c.height); g.stroke();
+  const x = st.tlX(st.t); g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, c.height); g.stroke();
+  g.fillStyle = C.acc; g.beginPath(); g.arc(x, 4, 4, 0, Math.PI * 2); g.fill();
 }
-$('tl').addEventListener('click', (e) => { const r = e.target.getBoundingClientRect(); const t = (e.clientX - r.left - 40) / (r.width - 50) * D.meta.duration; seek(Math.max(0, Math.min(D.meta.duration, t))); });
+$('tl').addEventListener('click', (e) => { const r = e.target.getBoundingClientRect(); const W = r.width; const t = (e.clientX - r.left - st.tlL) / (W - st.tlL - 6) * D.meta.duration; seek(Math.max(0, Math.min(D.meta.duration, t))); });
+
+// ---------------------------------------------------------------- HUD
+function svgEdge(roll) { // 后视板截面：板绕刃转动，雪面固定
+  const a = Math.max(-80, Math.min(80, roll)), col = roll >= 0 ? C.heel : C.toe;
+  const arc = (r, a0, a1) => { const p = (aa) => [63 + r * Math.sin(aa * Math.PI / 180), 62 - r * Math.cos(aa * Math.PI / 180)]; const [x0, y0] = p(a0), [x1, y1] = p(a1); return `M${x0},${y0} A${r},${r} 0 0 ${a1 > a0 ? 1 : 0} ${x1},${y1}`; };
+  let ticks = ''; for (let d = -80; d <= 80; d += 20) { const r1 = 52, r2 = d % 40 === 0 ? 46 : 49, aa = d * Math.PI / 180; ticks += `<line x1="${63 + r1 * Math.sin(aa)}" y1="${62 - r1 * Math.cos(aa)}" x2="${63 + r2 * Math.sin(aa)}" y2="${62 - r2 * Math.cos(aa)}" stroke="rgba(226,240,255,.25)"/>`; }
+  return `<path d="${arc(52, -80, 80)}" stroke="rgba(226,240,255,.12)" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path d="${arc(52, 0, a)}" stroke="${col}" stroke-width="5" fill="none" stroke-linecap="round"/>${ticks}
+    <line x1="18" y1="64" x2="108" y2="64" stroke="rgba(226,240,255,.25)" stroke-dasharray="3 3"/>
+    <g transform="rotate(${-a} 63 62)"><rect x="35" y="58" width="56" height="6" rx="3" fill="#e2463a"/><rect x="58" y="44" width="10" height="14" rx="2" fill="#23262d"/></g>`;
+}
+function svgSlip(slip) { // 俯视：蓝箭头=行进方向（固定向上），板绕中心转 slip
+  const a = Math.max(-60, Math.min(60, slip || 0));
+  return `<line x1="63" y1="66" x2="63" y2="6" stroke="#2f6fe4" stroke-width="2"/><path d="M63,3 l-5,9 h10z" fill="#2f6fe4"/>
+    <g transform="rotate(${a} 63 38)"><rect x="56" y="10" width="14" height="56" rx="7" fill="#e2463a" opacity=".9"/><circle cx="63" cy="15" r="2.6" fill="#fff"/></g>
+    <path d="M${63},${38} L${63 + 26 * Math.sin(a * Math.PI / 180)},${38 - 26 * Math.cos(a * Math.PI / 180)}" stroke="#ffbd69" stroke-width="1.5" stroke-dasharray="2 2"/>`;
+}
+const PHASES = [0.15, 0.4, 0.6, 0.85, 1.01];
+function hud(t, roll, tilt) {
+  const spd = num(D.speed, t) * 3.6;
+  $('gSpd').innerHTML = `${spd.toFixed(1)}<small>km/h</small>`; $('gSpdBar').style.width = Math.min(100, spd / 60 * 100) + '%';
+  $('gSpdS').textContent = D.meta.gps_ok ? 'GPS + 脚 IMU 融合' : '主链路 IMU 速度模型';
+  $('vSpd').textContent = spd.toFixed(0); $('vEdge').textContent = Math.abs(roll).toFixed(0);
+  $('dialEdge').innerHTML = svgEdge(roll);
+  $('gRoll').textContent = Math.abs(roll).toFixed(0) + '°';
+  const edge = Math.abs(roll) < 3 ? '平板' : roll > 0 ? '后刃' : '前刃';
+  $('gEdge').innerHTML = `<b style="color:${Math.abs(roll) < 3 ? C.dim : roll > 0 ? C.heel : C.toe}">${edge}</b>`;
+  if (D.sideslip) { const slip = num(D.sideslip, t); $('dialSlip').innerHTML = svgSlip(slip); $('gSlip').textContent = (slip > 0 ? '+' : '') + slip.toFixed(0) + '°';
+    $('gSlipS').textContent = Math.abs(slip) < 4 ? '顺着刃走' : Math.abs(slip) < 12 ? '轻微搓雪' : '明显侧滑'; }
+  else { $('dialSlip').innerHTML = svgSlip(0); $('gSlip').textContent = '—'; $('gSlipS').textContent = '不可用'; }
+  const fl = num(D.foot_roll_L, t), fr = num(D.foot_roll_R, t);
+  $('gFeet').innerHTML = `${Math.abs(fl).toFixed(0)}° <small style="font-size:12px;color:var(--dim)">/</small> ${Math.abs(fr).toFixed(0)}°`;
+  const gm = vec(D.f_loc, t).length(); $('gG').innerHTML = `${gm.toFixed(2)}<small>g</small>`; $('gGBar').style.width = Math.min(100, gm / 3 * 100) + '%';
+  $('gTilt').innerHTML = `${tilt.toFixed(0)}<small>°</small>`;
+  const tu = D.turns.find((x) => t >= x.t0 && t < x.t1);
+  document.querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', !!tu && c.dataset.id === tu.id));
+  if (tu) {
+    const S = turnStats(tu), ph = (t - tu.t0) / (tu.t1 - tu.t0);
+    $('gTurn').textContent = tu.id.replace('turn', 'T'); $('gTurnEdge').innerHTML = `<span style="color:${tu.edge === 'heel' ? C.heel : C.toe}">${tu.edge === 'heel' ? '后刃' : '前刃'}</span>`;
+    $('tTech').textContent = tu.tech === 'carving' ? '走刃' : tu.tech === 'skidding' ? '搓雪' : (tu.tech || '—');
+    $('tMax').textContent = tu.max_roll + '°'; $('tDur').textContent = S.dur.toFixed(2) + 's'; $('tSlip').textContent = D.sideslip ? S.slip.toFixed(0) + '°' : '—';
+    $('tSpd').textContent = S.spd.toFixed(0) + ' km/h'; $('tIdx').textContent = `${D.turns.indexOf(tu) + 1} / ${D.turns.length}`;
+    [...$('phase').children].forEach((el, k) => el.classList.toggle('on', ph >= (k ? PHASES[k - 1] : 0) && ph < PHASES[k]));
+    $('gTurnS').textContent = tu.status !== 'valid' ? `状态：${tu.status}` : '';
+  } else { $('gTurn').textContent = '—'; $('gTurnEdge').textContent = '直滑 / 换刃'; ['tTech', 'tMax', 'tDur', 'tSlip', 'tSpd', 'tIdx'].forEach((k) => $(k).textContent = '—'); [...$('phase').children].forEach((el) => el.classList.remove('on')); $('gTurnS').textContent = ''; }
+  const blk = D.blocks.find((b) => t >= b.t0 && t <= b.t1); $('blkpill').textContent = blk ? `片段 · ${blk.scene === 'carving' ? '走刃' : blk.scene === 'skidding' ? '搓雪' : blk.scene} · ${blk.n} 弯` : '片段 · —';
+  $('tlabel').innerHTML = `<b>${t.toFixed(2)}</b> / ${D.meta.duration.toFixed(1)} s · ${new Date((D.meta.t0_epoch + t) * 1000 + 8 * 3600e3).toISOString().slice(11, 22)} 北京时间`;
+  $('vclock').textContent = new Date((D.meta.t0_epoch + t) * 1000 + 8 * 3600e3).toISOString().slice(11, 21);
+  drawMinimap(t);
+}
+function drawMinimap(t) {
+  const c = $('minimap'), dpr = window.devicePixelRatio || 1, W = 226, H = 200;
+  if (c.width !== W * dpr) { c.width = W * dpr; c.height = H * dpr; }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  if (!st.mm) { const xs = D.pos.map((p) => p[0]), zs = D.pos.map((p) => p[2]); const x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
+    const sc = Math.min((W - 20) / Math.max(1, x1 - x0), (H - 20) / Math.max(1, z1 - z0)); st.mm = { x0, z0, sc, ox: (W - (x1 - x0) * sc) / 2, oz: (H - (z1 - z0) * sc) / 2 }; }
+  const m = st.mm, P = (p) => [m.ox + (p[0] - m.x0) * m.sc, m.oz + (p[2] - m.z0) * m.sc];
+  g.lineWidth = 2; g.strokeStyle = 'rgba(226,240,255,.12)'; g.beginPath(); D.pos.forEach((p, i) => { const [x, y] = P(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  const [ii] = idxAt(t); g.lineWidth = 3;
+  for (let i = 1; i <= ii; i++) { const [xa, ya] = P(D.pos[i - 1]), [xb, yb] = P(D.pos[i]); g.strokeStyle = D.roll[i] >= 0 ? C.heel : C.toe; g.beginPath(); g.moveTo(xa, ya); g.lineTo(xb, yb); g.stroke(); }
+  g.font = '700 9px SF Mono, Menlo, monospace'; g.fillStyle = C.dim;
+  for (const tu of D.turns) { const k = Math.max(0, Math.min(D.pos.length - 1, Math.round((tu.t0 + tu.t1) / 2 * D.meta.fs))); if (tu.t0 > t) continue; const [x, y] = P(D.pos[k]); g.fillText(tu.id.replace('turn', ''), x + 4, y - 3); }
+  const [cx, cy] = P(vec(D.pos, t).toArray()); g.fillStyle = '#fff'; g.beginPath(); g.arc(cx, cy, 5, 0, Math.PI * 2); g.fill(); g.fillStyle = C.acc; g.beginPath(); g.arc(cx, cy, 3, 0, Math.PI * 2); g.fill();
+}
 
 // ---------------------------------------------------------------- 视频同步
 const vid = $('vid');
@@ -442,12 +535,12 @@ function legendHtml() {
     `<span class="m">测</span> 立刃角 = AI_SkiMetric 主链路形变模型输出的雪板 Roll（双脚 IMU + 在线校准 OC 推出）`,
     `<span class="m">测</span> 板头朝向 = 双脚 IMU 校准后四元数的板长轴水平朝向（两脚取圆均值）`,
     `<span class="m">测</span> 弯切分 / 前后刃 / 走刃搓雪 = 主链路 turns + block scene`,
-    m.gps_ok ? `<span class="m">测</span> 轨迹/行进方向 = GPS 1Hz（位置+多普勒速度）与脚 IMU 加速度融合；绝对朝向用 GPS 加速度对齐` : `<span class="e">估</span> 轨迹 = 主链路板航向 Yaw × IMU 速度模型积分（与弯型图同法），整段转到起点→终点朝下；室内无 GPS，绝对方位和位置漂移不可校`,
+    m.gps_ok ? `<span class="m">测</span> 轨迹/行进方向 = GPS 1Hz（位置+多普勒速度）与脚 IMU 加速度融合；绝对朝向用 GPS 加速度对齐` : `<span class="e">估</span> 轨迹 = IMU 速度 × 行进方向积分；行进方向按侧切模型（R=8 m×cos 立刃）从板转动里分出"刻出来"的部分（Trackk PIVOT 同思路），整段转到起点→终点朝下；室内无 GPS，绝对方位不可校`,
     `<span class="m">测</span> 高度 = 气压计；坡面 = 轨迹+高度拟合的平面（不是 DEM）`];
   const est = [
-    m.gps_ok ? `<span class="e">估</span> 侧滑角 = 板头朝向 − GPS 融合行进方向。依赖 GPS 时延与对齐，绝对值误差约 ±5°` : `<span class="e">无</span> 侧滑角：轨迹本身沿板航向积分，没有独立的行进方向，不显示`,
+    m.gps_ok ? `<span class="e">估</span> 侧滑角 = 板头朝向 − GPS 融合行进方向。依赖 GPS 时延与对齐，绝对值误差约 ±5°` : `<span class="e">估</span> 侧滑角 = 板头（主链路 Yaw）− 侧切模型行进方向；走刃弯通常 <6°，搓雪/减速时增大`,
     mode === 'chest' ? `<span class="m">测</span> 胸口转动 = 手机陀螺+加速度（VQF 6 轴）相对参考时刻的增量；<span class="e">估</span> 参考时刻默认人在标准站姿；骨盆=0.35×胸` : `<span class="e">估</span> 身体整体倾斜 = 脚上测到的比力方向（假设人始终在平衡线上）；手臂/头/下蹲全是默认姿势`,
-    `<span class="e">估</span> 双脚钉在板上、膝盖两段 IK、骨盆高度固定 0.78 m：下蹲/起伏不可测`];
+    `<span class="e">估</span> 双脚钉在板上、膝盖两段 IK；骨盆高度随立刃/G/雪面起伏按规则压低与吸收（非实测）；肩膀转进弯、手臂平衡为规则动作；雪面起伏 ±8 cm 为模拟`];
   const phoneLine = ph.available ? `<details open><summary>手机放置判断：${({chest:'胸口（贴身）',chest_loose:'胸前口袋但晃动（不采用）',thigh_pocket:'大腿/裤兜'})[ph.placement] || ph.placement}</summary><ul>${ph.evidence.map((e) => `<li>${e}</li>`).join('')}</ul></details>` : '<div>本段没有手机 IMU</div>';
   return `<details id="lgd"><summary><b>数据来源：哪些是测的、哪些是估的</b></summary><h3>${m.title}</h3><div style="color:var(--dim)">session ${m.session} · ${m.t0_utc} UTC 起 ${m.duration}s · ${m.stance === 'regular' ? '正脚 regular' : '反脚 goofy'}</div>
   <ul>${measured.map((x) => `<li>${x}</li>`).join('')}${est.map((x) => `<li>${x}</li>`).join('')}</ul>
@@ -460,8 +553,9 @@ function load(name) {
   st.t = 0; st.snap = true;
   $('title').textContent = D.meta.title;
   const mode = currentBodyMode();
-  $('bodytag').textContent = mode === 'chest' ? 'BODY：手机驱动胸口（其余估算）' : 'BODY：估算（默认站姿 + 比力倾斜）';
-  $('trajtag').textContent = D.meta.gps_ok ? '轨迹：GPS 融合（实测）' : '轨迹：航位推算（估算）';
+  $('bodytag').textContent = mode === 'chest' ? '身体 · 手机驱动胸口' : '身体 · 估算';
+  st.mm = null; buildChips();
+  $('trajtag').textContent = D.meta.gps_ok ? '轨迹 · GPS 融合' : '轨迹 · 侧切模型推算';
   $('trajtag').className = 'tag ' + (D.meta.gps_ok ? 'ok' : 'est');
   $('legend').innerHTML = legendHtml();
   if (D.meta.video) {
@@ -480,13 +574,16 @@ ds.onchange = () => load(ds.value);
 $('play').onclick = () => setPlaying(!st.playing);
 $('rate').onchange = (e) => { st.rate = +e.target.value; syncVideo(true); };
 $('cam').onchange = (e) => { st.camMode = e.target.value; st.snap = true; };
+document.querySelectorAll('#camseg button').forEach((b) => b.onclick = () => { st.camMode = b.dataset.v; st.snap = true; $('cam').value = b.dataset.v; document.querySelectorAll('#camseg button').forEach((x) => x.classList.toggle('on', x === b)); });
+$('srcbtn').onclick = () => { $('drawer').classList.toggle('open'); const e = document.getElementById('lgd'); if (e) e.open = true; };
+$('srcclose').onclick = () => $('drawer').classList.remove('open');
 $('bodymode').onchange = (e) => { st.bodyMode = e.target.value; load(ds.value); };
 $('voff').oninput = (e) => { st.voff = +e.target.value; $('voffv').textContent = st.voff.toFixed(2) + 's'; drawTimeline(); syncVideo(true); };
 window.addEventListener('keydown', (e) => { if (e.code === 'Space') { setPlaying(!st.playing); e.preventDefault(); } if (e.code === 'ArrowRight') seek(st.t + (e.shiftKey ? 1 : 0.04)); if (e.code === 'ArrowLeft') seek(st.t - (e.shiftKey ? 1 : 0.04)); });
-function setPlaying(p) { st.playing = p; $('play').textContent = p ? '⏸ 暂停' : '▶ 播放'; st.last = performance.now(); syncVideo(true); }
+function setPlaying(p) { st.playing = p; $('play').textContent = p ? '❚❚' : '▶'; st.last = performance.now(); syncVideo(true); }
 function seek(t) { st.t = Math.max(0, Math.min(D.meta.duration, t)); st.snap = true; syncVideo(true); }
 // 给截图脚本用
-window.replay = { seek: (t) => { seek(t); frame(st.t); controls.update(); renderer.render(scene, camera); drawCursor(); }, load: (n) => { ds.value = n; load(n); }, setCam: (m) => { st.camMode = m; st.snap = true; $('cam').value = m; }, setBody: (m) => { st.bodyMode = m; $('bodymode').value = m; load(ds.value); }, openLegend: (o) => { const e = document.getElementById('lgd'); if (e) e.open = o; }, get t() { return st.t; }, data: () => D };
+window.replay = { seek: (t) => { seek(t); frame(st.t); controls.update(); renderer.render(scene, camera); drawCursor(); }, load: (n) => { ds.value = n; load(n); }, setCam: (m) => { st.camMode = m; st.snap = true; $('cam').value = m; document.querySelectorAll('#camseg button').forEach((x) => x.classList.toggle('on', x.dataset.v === m)); }, setBody: (m) => { st.bodyMode = m; $('bodymode').value = m; load(ds.value); }, openLegend: (o) => { const e = document.getElementById('lgd'); if (e) e.open = o; }, get t() { return st.t; }, data: () => D };
 
 function loop(now) {
   const dt = (now - st.last) / 1000; st.last = now;
