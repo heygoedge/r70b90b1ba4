@@ -97,7 +97,7 @@ function build() {
     tk.push(...p.clone().add(u).toArray(), ...p.clone().sub(u).toArray());
   }
   const tg = new T3.BufferGeometry(); tg.setAttribute('position', new T3.Float32BufferAttribute(tk, 3));
-  const ticks = new T3.LineSegments(tg, new T3.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.55 })); ticks.frustumCulled = false; ticks.visible = false; root.add(ticks);
+  const ticks = new T3.LineSegments(tg, new T3.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.55 })); ticks.frustumCulled = false; ticks.visible = !!D.sideslip; root.add(ticks);
   // GPS 原始点
   if (D.gps && D.gps.length) {
     const gg = new T3.SphereGeometry(0.18, 8, 6), gm = new T3.MeshBasicMaterial({ color: D.meta.gps_ok ? 0x3b6fd8 : 0xb04a4a, transparent: true, opacity: 0.7 });
@@ -273,14 +273,22 @@ function solveBody(t) {
   // 折叠（angulation）：上身比板面法向更"立"一些——取比力方向与坡面法向之间偏向比力 65% 的方向（估算，单板常见折叠 15–25°）
   if (world && world.board) { const nl = world.n.clone().applyQuaternion(world.board.quaternion.clone().invert()).normalize(); f = f.clone().lerp(nl, 0.35).normalize(); }
   const mode = currentBodyMode();
+  // 动态量：板转速（°/s，俯视顺时针为正）、立刃、比力大小 → 用来驱动上身的"主动动作"（估算，标注在面板里）
+  const dtq = 0.12, t0q = Math.max(0, t - dtq), t1q = Math.min(D.meta.duration - 0.01, t + dtq);
+  let wr = ang(D.bear_nose, t1q) - ang(D.bear_nose, t0q); wr = ((wr + 540) % 360 - 180) / (t1q - t0q);
+  const edgeNow = num(D.roll, t), ea = Math.min(1, Math.max(0, (Math.abs(edgeNow) - 8) / 45));
+  const gmag = vec(D.f_loc, t).length();
+  // 预判：看下一点的立刃方向，换刃前上身先转过去
+  const edgeNext = num(D.roll, Math.min(D.meta.duration - 0.01, t + 0.35));
   let up, chestQ = null;
   if (mode === 'chest') {
-    chestQ = quat(D.phone.chest_delta, t);       // 手机相对参考时刻的转动（板系）
+    chestQ = new T3.Quaternion().slerp(quat(D.phone.chest_delta, t), 0.6); // 手机相对参考时刻的转动（板系），晃动大只取 60%
     up = Y.clone();
   } else up = f;
   // 骨盆：沿"上方向"抬 0.78 m，略向后坐（脚跟侧）
   const pelvisQ = chestQ ? new T3.Quaternion().slerp(chestQ, 0.35) : new T3.Quaternion();
-  const P0 = footMid.clone().add(up.clone().multiplyScalar(0.78)).add(F.clone().multiplyScalar(-0.05));
+  const crouch = 0.13 * ea + 0.05 * Math.min(1, Math.max(0, gmag - 1)) - 0.03 * (1 - ea);   // 弯顶压低，换刃时伸展
+  const P0 = footMid.clone().add(up.clone().multiplyScalar(0.80 - crouch)).add(F.clone().multiplyScalar(-0.05 - 0.06 * ea * Math.sign(edgeNow) * s));
   const hips = chestQ ? footMid.clone().add(P0.clone().sub(footMid).applyQuaternion(pelvisQ)) : P0;
   const hipAxis = leftSide.clone().applyQuaternion(pelvisQ);
   const LH = hips.clone().add(hipAxis.clone().multiplyScalar(0.11)), RH = hips.clone().add(hipAxis.clone().multiplyScalar(-0.11));
@@ -288,19 +296,22 @@ function solveBody(t) {
   const LK = legIK(LH, LA, pole.clone().add(leftSide.clone().multiplyScalar(0.25)));
   const RK = legIK(RH, RA, pole.clone().add(leftSide.clone().multiplyScalar(-0.25)));
   // 躯干：默认站姿 = 上方向 + 向前（脚尖侧）弯 18°，肩线朝板头打开 15°
-  let U = up.clone().applyAxisAngle(lead, 10 * DEG * s).normalize();
-  let W = leftSide.clone().applyAxisAngle(up, 15 * DEG * s).normalize();
-  if (chestQ) { U = new T3.Vector3(0, 1, 0).applyAxisAngle(lead, 18 * DEG * s).applyQuaternion(chestQ); W = leftSide.clone().applyAxisAngle(Y, 15 * DEG * s).applyQuaternion(chestQ); }
+  const lean = chestQ ? 6 : 10 + 22 * ea;                      // 估算模式：压低时上身前屈更多；手机模式前屈由实测给
+  let U = up.clone().applyAxisAngle(lead, lean * DEG * s).normalize();
+  const twist = Math.max(-28, Math.min(28, -wr * 0.16)) + 10 * Math.sign(edgeNext - edgeNow) * Math.min(1, Math.abs(edgeNext - edgeNow) / 25) * (Math.abs(edgeNow) < 15 ? 1 : 0);
+  let W = leftSide.clone().applyAxisAngle(up, (15 + twist) * DEG * s).normalize();
+  if (chestQ) { U = U.applyQuaternion(chestQ).normalize(); W = W.applyQuaternion(chestQ).normalize(); } // 胸口手机的实测转动叠加在动态站姿上
   const Fw = U.clone().cross(W).multiplyScalar(-s).normalize(); // 胸口朝向
   const spine = hips.clone().add(U.clone().multiplyScalar(0.2)), chest = hips.clone().add(U.clone().multiplyScalar(0.4));
   const neck = hips.clone().add(U.clone().multiplyScalar(0.55)), head = hips.clone().add(U.clone().multiplyScalar(0.7));
   const LS = neck.clone().add(W.clone().multiplyScalar(0.19)).add(U.clone().multiplyScalar(-0.05));
   const RS = neck.clone().add(W.clone().multiplyScalar(-0.19)).add(U.clone().multiplyScalar(-0.05));
   // 手臂：没有传感器，跟胸走的默认平衡姿势（前手指向板头、后手略后）
-  const LE = LS.clone().add(U.clone().multiplyScalar(-0.2)).add(W.clone().multiplyScalar(0.14)).add(Fw.clone().multiplyScalar(0.06));
-  const LW = LE.clone().add(U.clone().multiplyScalar(-0.08)).add(W.clone().multiplyScalar(0.2)).add(Fw.clone().multiplyScalar(0.1));
-  const RE = RS.clone().add(U.clone().multiplyScalar(-0.22)).add(W.clone().multiplyScalar(-0.12)).add(Fw.clone().multiplyScalar(0.05));
-  const RW = RE.clone().add(U.clone().multiplyScalar(-0.12)).add(W.clone().multiplyScalar(-0.14)).add(Fw.clone().multiplyScalar(0.08));
+  const armUp = 0.08 + 0.10 * ea, sw = Math.max(-1, Math.min(1, -wr / 120));
+  const LE = LS.clone().add(U.clone().multiplyScalar(-0.2 + armUp * 0.5)).add(W.clone().multiplyScalar(0.14 + 0.04 * sw)).add(Fw.clone().multiplyScalar(0.06 + 0.06 * sw));
+  const LW = LE.clone().add(U.clone().multiplyScalar(-0.08 + armUp)).add(W.clone().multiplyScalar(0.2)).add(Fw.clone().multiplyScalar(0.1 + 0.08 * sw));
+  const RE = RS.clone().add(U.clone().multiplyScalar(-0.22 + armUp * 0.4)).add(W.clone().multiplyScalar(-0.12 - 0.05 * sw)).add(Fw.clone().multiplyScalar(0.05 - 0.07 * sw));
+  const RW = RE.clone().add(U.clone().multiplyScalar(-0.12 + armUp * 0.8)).add(W.clone().multiplyScalar(-0.14)).add(Fw.clone().multiplyScalar(0.08 - 0.1 * sw));
   const left = { LHip: LH, LKnee: LK, LAnkle: LA, LShoulder: LS, LElbow: LE, LWrist: LW };
   const right = { RHip: RH, RKnee: RK, RAnkle: RA, RShoulder: RS, RElbow: RE, RWrist: RW };
   return Object.assign({ Hips: hips, Spine: spine, Chest: chest, Neck: neck, Head: head }, left, right, { _tilt: Math.acos(Math.max(-1, Math.min(1, U.dot(Y)))) / DEG });
@@ -308,7 +319,7 @@ function solveBody(t) {
 function currentBodyMode() {
   if (st.bodyMode === 'chest' && D.phone.available) return 'chest';
   if (st.bodyMode === 'lean') return 'lean';
-  return (D.phone.available && D.phone.placement === 'chest') ? 'chest' : 'lean';
+  return (D.phone.available && String(D.phone.placement).startsWith('chest')) ? 'chest' : 'lean';
 }
 const Yaxis = new T3.Vector3(0, 1, 0);
 const CORNERS = []; for (const x of [-0.78, -0.5, 0, 0.5, 0.78]) for (const z of [-0.135, 0.135]) CORNERS.push(new T3.Vector3(x, -0.01, z));
