@@ -125,10 +125,14 @@
   body.m .chip.gap { display:none; }
   body.m #tl { height:120px; }
   body.m #drawer { width:100%; position:fixed; }
+
+  /* ---------- 录屏模式（?rec=1）：只留左视频 + 右 3D ---------- */
+  body.rec #app { grid-template-rows:1fr; } body.rec header, body.rec footer, body.rec #vidctl, body.rec #srccard { display:none !important; }
+  body.rec #vid { max-height:100vh; height:100vh; }
 </style>
 </head>
 <body>
-<script>if (/Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent) || new URLSearchParams(location.search).get('m') === '1') document.body.classList.add('m');</script>
+<script>if (/Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent) || new URLSearchParams(location.search).get('m') === '1') document.body.classList.add('m'); if (new URLSearchParams(location.search).get('rec') === '1') document.body.classList.add('rec');</script>
 <div id="app">
   <header>
     <div class="brand"><b>Hey<i>Go</i></b><span>3D Replay</span></div>

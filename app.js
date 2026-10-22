@@ -457,6 +457,7 @@ function buildChips() {
 }
 function drawTimeline() {
   const c = $('tl'), r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (r.width < 20 || r.height < 20) { st.tlImg = null; st.tlX = () => 0; st.tlL = 0; return; }
   c.width = r.width * dpr; c.height = r.height * dpr;
   const g = c.getContext('2d', { willReadFrequently: true }); g.setTransform(dpr, 0, 0, dpr, 0, 0);
   const W = r.width, H = r.height, dur = D.meta.duration, L = 64, X = (t) => L + (W - L - 6) * t / dur;
