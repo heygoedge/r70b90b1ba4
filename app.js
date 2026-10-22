@@ -335,7 +335,8 @@ function solveBody(t) {
   if (world && world.board) { const nl = world.n.clone().applyQuaternion(world.board.quaternion.clone().invert()).normalize(); f = f.clone().lerp(nl, 0.35).normalize(); }
   const mode = currentBodyMode();
   const fi = Math.min(D.t.length - 1, Math.max(0, Math.round(t * D.meta.fs))), fside = D.fall ? D.fall[fi] : 0;
-  const fallW = smooth('fallW', fside ? 1 : 0, t, 0.35); if (fside) st.fallSide = fside;
+  const fallW = D.fallW ? num(D.fallW, t) : 0, kneelK = D.fallKneel ? num(D.fallKneel, t) : 0, recline = D.fallRecline ? num(D.fallRecline, t) : 0;
+  if (D.fallSideArr && D.fallSideArr[fi]) st.fallSide = D.fallSideArr[fi];
   const nlS = (world && world.board) ? world.n.clone().applyQuaternion(world.board.quaternion.clone().invert()).normalize() : Y.clone();
   // 动态量：板转速（°/s，俯视顺时针为正）、立刃、比力大小 → 用来驱动上身的"主动动作"（估算，标注在面板里）
   const dtq = 0.12, t0q = Math.max(0, t - dtq), t1q = Math.min(D.meta.duration - 0.01, t + dtq);
@@ -361,13 +362,14 @@ function solveBody(t) {
   const fs2 = st.fallSide || 1;
   const toeDir = F.clone().sub(nlS.clone().multiplyScalar(F.dot(nlS))).normalize();
   if (fallW > 0.01) {
-    const hipsFall = fs2 > 0 ? footMid.clone().add(toeDir.clone().multiplyScalar(-0.42)).add(nlS.clone().multiplyScalar(0.14))
-                             : footMid.clone().add(toeDir.clone().multiplyScalar(0.34)).add(nlS.clone().multiplyScalar(0.46));
+    const sitH = footMid.clone().add(toeDir.clone().multiplyScalar(-0.42)).add(nlS.clone().multiplyScalar(0.14));
+    const kneelH = footMid.clone().add(toeDir.clone().multiplyScalar(0.34)).add(nlS.clone().multiplyScalar(0.46));
+    const hipsFall = fs2 > 0 ? sitH.lerp(kneelH, kneelK) : kneelH;
     hips = hips.clone().lerp(hipsFall, fallW);
   }
   const hipAxis = leftSide.clone().applyQuaternion(pelvisQ);
   const LH = hips.clone().add(hipAxis.clone().multiplyScalar(0.11)), RH = hips.clone().add(hipAxis.clone().multiplyScalar(-0.11));
-  const pole = F.clone().add(up.clone().multiplyScalar(0.1)).add(nlS.clone().multiplyScalar(fs2 > 0 ? 1.4 * fallW : 0)); // 坐下时膝盖朝上
+  const pole = F.clone().add(up.clone().multiplyScalar(0.1)).add(nlS.clone().multiplyScalar(fs2 > 0 ? 1.4 * fallW * (1 - kneelK) : 0)); // 坐下时膝盖朝上，跪撑时朝前
   const LK = legIK(LH, LA, pole.clone().add(leftSide.clone().multiplyScalar(0.25)));
   const RK = legIK(RH, RA, pole.clone().add(leftSide.clone().multiplyScalar(-0.25)));
   // 躯干：默认站姿 = 上方向 + 向前（脚尖侧）弯 18°，肩线朝板头打开 15°
@@ -376,7 +378,8 @@ function solveBody(t) {
   const twist = smooth('twist', Math.max(-28, Math.min(28, -wr * 0.16)) + 10 * Math.sign(edgeNext - edgeNow) * Math.min(1, Math.abs(edgeNext - edgeNow) / 25) * (Math.abs(edgeNow) < 15 ? 1 : 0), t, 0.18);
   let W = leftSide.clone().applyAxisAngle(up, (15 + twist) * DEG * s).normalize();
   if (chestQ) { U = U.applyQuaternion(chestQ).normalize(); W = W.applyQuaternion(chestQ).normalize(); } // 胸口手机的实测转动叠加在动态站姿上
-  if (fallW > 0.01) { const Uf = nlS.clone().add(toeDir.clone().multiplyScalar(fs2 > 0 ? -0.35 : 0.15)).normalize(); U = U.clone().lerp(Uf, fallW).normalize(); }
+  if (fallW > 0.01) { const back = fs2 > 0 ? -(0.35 + 0.9 * recline) * (1 - kneelK) + 0.15 * kneelK : 0.15;
+    const Uf = nlS.clone().add(toeDir.clone().multiplyScalar(back)).normalize(); U = U.clone().lerp(Uf, fallW).normalize(); }
   const Fw = U.clone().cross(W).multiplyScalar(-s).normalize(); // 胸口朝向
   const spine = hips.clone().add(U.clone().multiplyScalar(0.2)), chest = hips.clone().add(U.clone().multiplyScalar(0.4));
   const neck = hips.clone().add(U.clone().multiplyScalar(0.55)), head = hips.clone().add(U.clone().multiplyScalar(0.7));
@@ -389,7 +392,7 @@ function solveBody(t) {
   const RE = RS.clone().add(U.clone().multiplyScalar(-0.22 + armUp * 0.4)).add(W.clone().multiplyScalar(-0.12 - 0.05 * sw)).add(Fw.clone().multiplyScalar(0.05 - 0.07 * sw));
   const RW = RE.clone().add(U.clone().multiplyScalar(-0.12 + armUp * 0.8)).add(W.clone().multiplyScalar(-0.14)).add(Fw.clone().multiplyScalar(0.08 - 0.1 * sw));
   if (fallW > 0.01) { // 手撑雪面：坐=撑在身后，跪=撑在身前
-    const back = toeDir.clone().multiplyScalar(fs2 > 0 ? -1 : 1);
+    const back = toeDir.clone().multiplyScalar(fs2 > 0 ? 1 - 2 * (1 - kneelK) : 1);
     for (const [E, Wr, sh, sg] of [[LE, LW, LS, 1], [RE, RW, RS, -1]]) {
       const hand = hips.clone().add(back.clone().multiplyScalar(0.28)).add(leftSide.clone().multiplyScalar(0.22 * sg)).add(nlS.clone().multiplyScalar(-(hips.clone().sub(footMid).dot(nlS)) + 0.03));
       const elb = sh.clone().lerp(hand, 0.5).add(back.clone().multiplyScalar(0.06));
@@ -625,7 +628,22 @@ function load(name) {
       else if (on && ((v > 5.5 && Math.abs(r) < 30) || flat > 1.2)) on = 0;   // 板放平 1.2 s 视为已站起
       D.fall[i] = on ? side : 0; }
     // 至少持续 0.6 s 才算，避免慢速大立刃的正常弯被误判
-    let i = 0; while (i < n) { if (!D.fall[i]) { i++; continue; } let j = i; while (j < n && D.fall[j]) j++; if ((j - i) / D.meta.fs < 0.6) for (let k = i; k < j; k++) D.fall[k] = 0; i = j; } }
+    let i = 0; while (i < n) { if (!D.fall[i]) { i++; continue; } let j = i; while (j < n && D.fall[j]) j++; if ((j - i) / D.meta.fs < 0.6) for (let k = i; k < j; k++) D.fall[k] = 0; i = j; }
+    // 关键帧化的平滑曲线（对照视频：先慢慢坐下 ~0.8 s → 坐着滑/后仰 → 翻到前刃跪撑 → 站起）
+    D.fallW = new Float32Array(n); D.fallKneel = new Float32Array(n); D.fallRecline = new Float32Array(n); D.fallSideArr = new Int8Array(n);
+    const ss = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }, fsr = D.meta.fs;
+    i = 0; while (i < n) { if (!D.fall[i]) { i++; continue; } let j = i; while (j < n && D.fall[j]) j++;
+      const side = D.fall[i]; let a = i; while (a > 0 && Math.abs(D.roll[a - 1]) > 35 && (i - a) / fsr < 2.5) a--;   // 下坐开始：立刃刚过 35°
+      const b = a + Math.round(0.8 * fsr);                                                                       // 坐稳
+      let c = b; while (c < j && Math.abs(D.roll[c]) > 30) c++;                                                    // 起身开始：立刃回落 <30°
+      const d = Math.max(c + Math.round(1.0 * fsr), j);                                                            // 站稳
+      for (let k = Math.max(0, a); k < Math.min(n, d + 1); k++) {
+        D.fallSideArr[k] = side;
+        D.fallW[k] = k <= b ? ss((k - a) / (b - a)) : k <= c ? 1 : 1 - ss((k - c - 0.4 * (d - c)) / (0.6 * (d - c)));
+        D.fallKneel[k] = side > 0 ? ss((k - c) / (0.45 * (d - c))) : 1;                                            // 后刃坐 → 前刃跪撑
+        D.fallRecline[k] = (k > b && k < c) ? Math.sin(Math.PI * (k - b) / (c - b)) : 0;                         // 坐着时中段后仰
+      }
+      i = Math.max(j, d + 1); } }
   $('trajtag').textContent = D.meta.gps_ok ? '轨迹 · GPS 融合' : '轨迹 · 侧切模型推算';
   $('trajtag').className = 'tag ' + (D.meta.gps_ok ? 'ok' : 'est');
   $('legend').innerHTML = legendHtml();
