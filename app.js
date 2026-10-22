@@ -174,8 +174,8 @@ function loadRiderModel(w) {
 function attachModel(w, gltf) {
   const obj = T3.SkeletonUtils.clone(gltf.scene);
   // 滑雪服：MakeHuman 真人模型（Ara 3D Gen 生成）。夹克/裤子换成光滑面料并向外"充气"做出蓬松感，去掉绑带
-  const PUFF = { 'Techwear jacket': 0.04, 'Techwear pants': 0.03 };
-  const COLOR = { 'Techwear jacket': 0xd9733b, 'Techwear pants': 0xcfc6ac, 'Helmet': 0x16181d, 'Boot shafts': 0x1b1d22, 'Shoes': 0x1b1d22 };
+  const PUFF = { 'Techwear jacket': 0.06, 'Techwear pants': 0.045 };
+  const COLOR = { 'Techwear jacket': 0xffd43b, 'Techwear pants': 0xeef1f4, 'Helmet': 0x16181d, 'Boot shafts': 0x1b1d22, 'Shoes': 0x1b1d22 };
   obj.traverse((o) => {
     if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -207,11 +207,11 @@ function attachModel(w, gltf) {
   const goggle = new T3.Mesh(new T3.BoxGeometry(1, 1, 1), new T3.MeshStandardMaterial({ color: 0x8fb7ff, roughness: 0.1, metalness: 0.6 }));
   helmet.castShadow = goggle.castShadow = true; helmet.visible = goggle.visible = false; scene.add(helmet, goggle);
   // 宽松滑雪服外层（跟着骨骼走）：裤腿、膝部、夹克下摆、手套——遮住膝/髋关节的硬折角
-  const pantsM = new T3.MeshStandardMaterial({ color: 0xcfc6ac, roughness: 0.7 }), jackM = new T3.MeshStandardMaterial({ color: 0xd9733b, roughness: 0.62 }), gloveM = new T3.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.55 });
+  const pantsM = new T3.MeshStandardMaterial({ color: 0xeef1f4, roughness: 0.75 }), jackM = new T3.MeshStandardMaterial({ color: 0xffd43b, roughness: 0.6 }), gloveM = new T3.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.55 });
   const cyl = new T3.CylinderGeometry(1, 1, 1, 20, 1, true), sph = new T3.SphereGeometry(1, 20, 14);
   const mk = (g, m) => { const o = new T3.Mesh(g, m); o.castShadow = true; o.frustumCulled = false; scene.add(o); return o; };
   const garb = { thigh: [mk(cyl, pantsM), mk(cyl, pantsM)], shin: [mk(cyl, pantsM), mk(cyl, pantsM)], knee: [mk(sph, pantsM), mk(sph, pantsM)], hipb: [mk(sph, pantsM), mk(sph, pantsM)],
-    hem: mk(new T3.CylinderGeometry(1, 1, 1, 24, 1, true), jackM), seat: mk(sph, pantsM), glove: [mk(sph, gloveM), mk(sph, gloveM)], cuff: [mk(cyl, gloveM), mk(cyl, gloveM)] };
+    hem: mk(new T3.CylinderGeometry(1, 1, 1, 24, 1, true), jackM), seat: mk(sph, pantsM), torso: mk(sph, jackM), chest: mk(sph, jackM), uarm: [mk(cyl, jackM), mk(cyl, jackM)], farm: [mk(cyl, jackM), mk(cyl, jackM)], elb: [mk(sph, jackM), mk(sph, jackM)], shd: [mk(sph, jackM), mk(sph, jackM)], collar: mk(cyl, jackM), glove: [mk(sph, gloveM), mk(sph, gloveM)], cuff: [mk(cyl, gloveM), mk(cyl, gloveM)] };
   w.model = { obj, B, rest, helmet, goggle, hs, garb };
   for (const o of [...w.bones, ...Object.values(w.J), ...w.boots]) o.visible = false;
   if (D) { frame(st.t); }
@@ -264,12 +264,17 @@ function driveModel(w, P) {
     const ball = (o, p, r) => { o.position.copy(p); o.scale.setScalar(r); };
     ['Left', 'Right'].forEach((sd, k) => {
       const hp = wp(B[sd + 'UpLeg']), kn = wp(B[sd + 'Leg']), an = wp(B[sd + 'Foot']);
-      seg(G.thigh[k], hp, kn, 0.105, 0.08); seg(G.shin[k], kn, an.clone().lerp(kn, 0.08), 0.092, 0.06);
-      ball(G.knee[k], kn, 0.1); ball(G.hipb[k], hp, 0.11);
+      seg(G.thigh[k], hp, kn, 0.13, 0.1); seg(G.shin[k], kn, an.clone().lerp(kn, 0.06), 0.112, 0.05);
+      ball(G.knee[k], kn, 0.125); ball(G.hipb[k], hp, 0.135);
       const hd = wp(B[sd + 'Hand']), fa = wp(B[sd + 'ForeArm']), mf = B[sd + 'HandMiddle2'] ? wp(B[sd + 'HandMiddle2']) : hd.clone().lerp(fa, -0.4); ball(G.glove[k], hd.clone().lerp(mf, 0.55), 0.068); G.glove[k].scale.set(0.068, 0.068, 0.068); seg(G.cuff[k], fa.clone().lerp(hd, 0.7), hd, 0.055, 0.0);
+      const sh = wp(B[sd + 'Arm']); seg(G.uarm[k], sh, fa, 0.075, 0.12); seg(G.farm[k], fa, fa.clone().lerp(hd, 0.85), 0.068, 0.0); ball(G.elb[k], fa, 0.075); ball(G.shd[k], sh, 0.095);
     });
     const hips = wp(B.Hips), sp = wp(B.Spine1), up = sp.clone().sub(hips).normalize();
-    G.hem.position.copy(hips).add(up.clone().multiplyScalar(0.04)); G.hem.quaternion.setFromUnitVectors(Y, up); G.hem.scale.set(0.19, 0.24, 0.16);
+    G.hem.position.copy(hips).add(up.clone().multiplyScalar(0.06)); G.hem.quaternion.setFromUnitVectors(Y, up); G.hem.scale.set(0.215, 0.26, 0.18);
+    { const s2 = wp(B.Spine2), nk = wp(B.Neck), lsh = wp(B.LeftArm), rsh = wp(B.RightArm), q = worldQ(B.Spine1);
+      G.torso.position.copy(sp.clone().lerp(s2, 0.3)); G.torso.quaternion.copy(q); G.torso.scale.set(0.2, 0.25, 0.17);
+      G.chest.position.copy(s2.clone().lerp(nk, 0.25)); G.chest.quaternion.copy(worldQ(B.Spine2)); G.chest.scale.set(0.215, 0.17, 0.165);
+      seg(G.collar, s2.clone().lerp(nk, 0.7), nk.clone().lerp(wp(B.Head), 0.25), 0.075, 0.0); }
     G.hem.quaternion.multiply(new T3.Quaternion().setFromAxisAngle(Y, 0)); 
     ball(G.seat, hips.clone().add(up.clone().multiplyScalar(-0.04)), 0.165);
   }
