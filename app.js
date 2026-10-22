@@ -175,7 +175,7 @@ function attachModel(w, gltf) {
   const obj = T3.SkeletonUtils.clone(gltf.scene);
   // 滑雪服：MakeHuman 真人模型（Ara 3D Gen 生成）。夹克/裤子换成光滑面料并向外"充气"做出蓬松感，去掉绑带
   const PUFF = { 'Techwear jacket': 0.06, 'Techwear pants': 0.045 };
-  const COLOR = { 'Techwear jacket': 0xffd43b, 'Techwear pants': 0xeef1f4, 'Helmet': 0x16181d, 'Boot shafts': 0x1b1d22, 'Shoes': 0x1b1d22 };
+  const COLOR = { 'Techwear jacket': 0xd9733b, 'Techwear pants': 0xeef1f4, 'Helmet': 0x16181d, 'Boot shafts': 0x1b1d22, 'Shoes': 0x1b1d22 };
   obj.traverse((o) => {
     if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -207,7 +207,7 @@ function attachModel(w, gltf) {
   const goggle = new T3.Mesh(new T3.BoxGeometry(1, 1, 1), new T3.MeshStandardMaterial({ color: 0x8fb7ff, roughness: 0.1, metalness: 0.6 }));
   helmet.castShadow = goggle.castShadow = true; helmet.visible = goggle.visible = false; scene.add(helmet, goggle);
   // 宽松滑雪服外层（跟着骨骼走）：裤腿、膝部、夹克下摆、手套——遮住膝/髋关节的硬折角
-  const pantsM = new T3.MeshStandardMaterial({ color: 0xeef1f4, roughness: 0.75 }), jackM = new T3.MeshStandardMaterial({ color: 0xffd43b, roughness: 0.6 }), gloveM = new T3.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.55 });
+  const pantsM = new T3.MeshStandardMaterial({ color: 0xeef1f4, roughness: 0.75 }), jackM = new T3.MeshStandardMaterial({ color: 0xd9733b, roughness: 0.6 }), gloveM = new T3.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.55 });
   const cyl = new T3.CylinderGeometry(1, 1, 1, 20, 1, true), sph = new T3.SphereGeometry(1, 20, 14);
   const mk = (g, m) => { const o = new T3.Mesh(g, m); o.castShadow = true; o.frustumCulled = false; scene.add(o); return o; };
   const garb = { thigh: [mk(cyl, pantsM), mk(cyl, pantsM)], shin: [mk(cyl, pantsM), mk(cyl, pantsM)], knee: [mk(sph, pantsM), mk(sph, pantsM)], hipb: [mk(sph, pantsM), mk(sph, pantsM)],

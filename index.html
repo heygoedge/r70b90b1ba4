@@ -95,9 +95,40 @@
   .chip.gap { background:transparent; border-color:var(--line); color:var(--dim2); cursor:default; }
   #tl { width:100%; height:116px; display:block; cursor:pointer; }
   #rate { padding:6px 26px 6px 12px; }
+
+  /* ---------- 手机竖屏布局（按 UA 判定，飞书内置浏览器的宽度不可靠） ---------- */
+  body.m #app { display:block; height:auto; }
+  body.m header { height:auto; flex-wrap:wrap; gap:8px; padding:10px 12px; }
+  body.m .brand span, body.m header .pill:not(#bodytag):not(#trajtag), body.m #srcbtn, body.m header .sp { display:none; }
+  body.m header .sel:first-of-type { flex:1 1 100%; } body.m #ds { width:100%; }
+  body.m #bodytag, body.m #trajtag { font-size:9px; padding:4px 8px; }
+  body.m .seg button { padding:5px 9px; font-size:10px; }
+  body.m main { flex-direction:column; }
+  body.m #view { order:1; flex:none; height:58vh; min-height:340px; }
+  body.m #vidwrap { order:2; width:100%; border-right:0; border-top:1px solid var(--line); align-items:center; }
+  body.m #vid { width:auto; max-width:100%; height:34vh; max-height:none; }
+  body.m #vidctl { width:100%; }
+  body.m #hud { left:8px; right:8px; top:8px; grid-template-columns:repeat(3,1fr); gap:5px; }
+  body.m #hud .card { padding:6px 7px; border-radius:9px; }
+  body.m #hud svg { width:84px; height:47px; }
+  body.m .big { font-size:20px; } body.m #gRoll, body.m #gSlip { font-size:16px !important; }
+  body.m .sub, body.m .badge { display:none; }
+  body.m #hud2, body.m #mapcard, body.m #srccard { display:none; }
+  body.m #turncard { top:auto; bottom:8px; left:8px; right:8px; width:auto; padding:8px 10px; display:flex; align-items:center; gap:10px; }
+  body.m #turncard .k, body.m #turncard .kv, body.m #turncard .phlab, body.m #gTurnS { display:none; }
+  body.m #turncard .tt { margin:0; } body.m #turncard .tt b { font-size:22px; }
+  body.m #turncard .phase { flex:1; margin:0; }
+  body.m footer { display:block; padding:0 10px 14px; }
+  body.m #ctl { height:48px; } body.m #blkpill { display:none; }
+  body.m #chips { overflow-x:auto; height:30px; padding-bottom:4px; }
+  body.m .chip { flex:0 0 auto !important; padding:0 8px; }
+  body.m .chip.gap { display:none; }
+  body.m #tl { height:120px; }
+  body.m #drawer { width:100%; position:fixed; }
 </style>
 </head>
 <body>
+<script>if (/Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent) || new URLSearchParams(location.search).get('m') === '1') document.body.classList.add('m');</script>
 <div id="app">
   <header>
     <div class="brand"><b>Hey<i>Go</i></b><span>3D Replay</span></div>
