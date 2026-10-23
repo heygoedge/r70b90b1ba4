@@ -458,17 +458,28 @@ function solveBody(t) {
   if (chestQ) { U = U.applyQuaternion(chestQ).normalize(); W = W.applyQuaternion(chestQ).normalize(); } // 胸口手机的实测转动叠加在动态站姿上
   if (fallW > 0.01) { const back = fs2 > 0 ? -(0.35 + 0.9 * recline) * (1 - kneelK) + 0.15 * kneelK : 0.15;
     const Uf = nlS.clone().add(toeDir.clone().multiplyScalar(back)).normalize(); U = U.clone().lerp(Uf, fallW).normalize(); }
-  const Fw = U.clone().cross(W).multiplyScalar(-s).normalize(); // 胸口朝向
+  let Fw = U.clone().cross(W).normalize(); if (Fw.dot(F) < 0) Fw.negate(); // 胸口朝向：垂直于肩线和躯干、朝脚尖一侧（v2：原来按站姿乘号，反脚时朝向脚跟、手跑到背后）
   const spine = hips.clone().add(U.clone().multiplyScalar(0.2)), chest = hips.clone().add(U.clone().multiplyScalar(0.4));
   const neck = hips.clone().add(U.clone().multiplyScalar(0.55)), head = hips.clone().add(U.clone().multiplyScalar(0.7));
   const LS = neck.clone().add(W.clone().multiplyScalar(0.19)).add(U.clone().multiplyScalar(-0.05));
   const RS = neck.clone().add(W.clone().multiplyScalar(-0.19)).add(U.clone().multiplyScalar(-0.05));
   // 手臂：没有传感器，跟胸走的默认平衡姿势（前手指向板头、后手略后）
-  const armUp = smooth('armUp', 0.08 + 0.10 * ea, t, 0.25), sw = smooth('sw', Math.max(-1, Math.min(1, -wr / 120)), t, 0.3);
-  const LE = LS.clone().add(U.clone().multiplyScalar(-0.2 + armUp * 0.5)).add(W.clone().multiplyScalar(0.14 + 0.04 * sw)).add(Fw.clone().multiplyScalar(0.06 + 0.06 * sw));
-  const LW = LE.clone().add(U.clone().multiplyScalar(-0.08 + armUp)).add(W.clone().multiplyScalar(0.2)).add(Fw.clone().multiplyScalar(0.1 + 0.08 * sw));
-  const RE = RS.clone().add(U.clone().multiplyScalar(-0.22 + armUp * 0.4)).add(W.clone().multiplyScalar(-0.12 - 0.05 * sw)).add(Fw.clone().multiplyScalar(0.05 - 0.07 * sw));
-  const RW = RE.clone().add(U.clone().multiplyScalar(-0.12 + armUp * 0.8)).add(W.clone().multiplyScalar(-0.14)).add(Fw.clone().multiplyScalar(0.08 - 0.1 * sw));
+  // v2 手臂：参考跟拍视频固定一个"基准位置"——两手都在身体前方、腰到胸的高度，向两侧略张开，肘弯 90–120°；
+  // 前手（板头一侧，regular=左手、goofy=右手）更靠前、略高并指向板头，后手在后髋前方，不背到身后、不折贴身体。
+  // 在基准位置上叠加小幅摆动：转弯时两手一起随上身扭转方向摆、立刃大时略抬起、蹲起时随身体上下，都带惯性。
+  const armUp = smooth('armUp', 0.04 * ea, t, 0.3), sw = smooth('sw', Math.max(-1, Math.min(1, -wr / 120)), t, 0.35);
+  const bob = smooth('armBob', crouch, t, 0.25) - crouch;   // 手比身体慢半拍
+  const armPose = (sh, out, lead) => {
+    const e = sh.clone().add(U.clone().multiplyScalar(-0.22 + armUp * 0.6 + bob * 0.5))
+      .add(Fw.clone().multiplyScalar((lead ? 0.12 : 0.09) + 0.03 * sw * out))
+      .add(W.clone().multiplyScalar(out * (lead ? 0.08 : 0.06) + 0.03 * sw));
+    const w2 = e.clone().add(U.clone().multiplyScalar((lead ? 0.05 : 0.01) + armUp + bob * 0.8))
+      .add(Fw.clone().multiplyScalar((lead ? 0.22 : 0.18) + 0.05 * sw * out))
+      .add(W.clone().multiplyScalar(out * (lead ? 0.13 : 0.05) + 0.06 * sw));
+    return [e, w2];
+  };
+  const leftLead = s > 0;
+  const [LE, LW] = armPose(LS, 1, leftLead), [RE, RW] = armPose(RS, -1, !leftLead);
   if (fallW > 0.01) { // 手撑雪面：坐=撑在身后，跪=撑在身前
     const back = toeDir.clone().multiplyScalar(fs2 > 0 ? 1 - 2 * (1 - kneelK) : 1);
     for (const [E, Wr, sh, sg] of [[LE, LW, LS, 1], [RE, RW, RS, -1]]) {
