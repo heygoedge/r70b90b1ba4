@@ -47,7 +47,7 @@ const R = (f) => f.contentWindow && f.contentWindow.replay;
 function ready() { return R(A) && R(B) && A.contentWindow.__ready && B.contentWindow.__ready; }
 function initList() {
   // 数据集列表从旧版页面里取（两边读的是同一份数据）
-  const w = A.contentWindow; if (!w || !w.REPLAY_LIST) return setTimeout(initList, 300);
+  const w = A.contentWindow; if (!w || !w.__ready || !w.REPLAY_DATA) return setTimeout(initList, 300);
   const sel = $('ds'); sel.innerHTML = ''; for (const n of w.REPLAY_LIST) { const o = document.createElement('option'); o.value = n; o.textContent = (w.REPLAY_DATA[n] || {}).meta ? w.REPLAY_DATA[n].meta.title : n; sel.appendChild(o); }
   sel.value = ds;
 }
