@@ -407,7 +407,10 @@ function solveBody(t) {
   let bAbs = 0; { const pn = vec(D.pos, t), bn = bump(pn.x, pn.z); let acc = 0, k = 0; for (let j = 1; j <= 6; j++) { const tt = Math.max(0, t - j * 0.07); const pj = vec(D.pos, tt); acc += bump(pj.x, pj.z); k++; } bAbs = bn - acc / k; }
   let crouch = 0.13 * ea + 0.05 * Math.min(1, Math.max(0, gmag - 1)) - 0.03 * (1 - ea) + Math.max(-0.05, Math.min(0.08, bAbs));   // 弯顶压低，换刃时伸展
   crouch = smooth('crouch', crouch, t, 0.12);
-  const P0 = footMid.clone().add(up.clone().multiplyScalar(0.80 - crouch)).add(F.clone().multiplyScalar(-0.05 - 0.06 * ea * Math.sign(edgeNow) * s));
+  // 髋部前后：F 已经指向脚尖侧（含站姿），立刃 >0 恒为后刃，所以这里不能再乘站姿符号（原来乘了 s，反脚时后刃反而把髋推到脚尖侧，膝盖顶死、脚踝压扁）。
+  // 后刃往脚跟侧坐得更多（小腿靠在高背上，比板面法向前倾不超过 ~20°），前刃髋略过脚尖
+  const heelK = edgeNow > 0 ? 1 : 0, hipShift = smooth('hipShift', -0.05 - 0.11 * ea * heelK + 0.05 * ea * (1 - heelK), t, 0.15);
+  const P0 = footMid.clone().add(up.clone().multiplyScalar(0.80 - crouch)).add(F.clone().multiplyScalar(hipShift));
   let hips = chestQ ? footMid.clone().add(P0.clone().sub(footMid).applyQuaternion(pelvisQ)) : P0;
   // 倒地姿态：后刃=坐在雪上（臀部落在脚跟一侧、离雪面 12 cm），前刃=跪（膝盖着雪、臀部在脚尖一侧抬高）；都按雪面法向摆，避免穿模
   const fs2 = st.fallSide || 1;
@@ -419,8 +422,16 @@ function solveBody(t) {
     hips = hips.clone().lerp(hipsFall, fallW);
   }
   const hipAxis = leftSide.clone().applyQuaternion(pelvisQ);
-  const LH = hips.clone().add(hipAxis.clone().multiplyScalar(0.11)), RH = hips.clone().add(hipAxis.clone().multiplyScalar(-0.11));
   const pole = F.clone().add(up.clone().multiplyScalar(0.1)).add(nlS.clone().multiplyScalar(fs2 > 0 ? 1.4 * fallW * (1 - kneelK) : 0)); // 坐下时膝盖朝上，跪撑时朝前
+  // 后刃：小腿靠在固定器高背上，相对板面法向往脚尖侧最多前倾 ~18°；超了就把髋往脚跟侧挪（坐下去），不让脚踝被压死
+  const shinFwd = (H, A, k) => { const K = legIK(H, A, pole.clone().add(leftSide.clone().multiplyScalar(k))); const sv = K.clone().sub(A).normalize(); return Math.atan2(sv.dot(F), sv.dot(Y)) / DEG; };
+  if (edgeNow > 0 && fallW < 0.3) for (let it = 0; it < 8; it++) {
+    const LHt = hips.clone().add(hipAxis.clone().multiplyScalar(0.11)), RHt = hips.clone().add(hipAxis.clone().multiplyScalar(-0.11));
+    const ex = Math.max(shinFwd(LHt, LA, 0.25), shinFwd(RHt, RA, -0.25)) - 18;
+    if (ex <= 0.5) break;
+    hips = hips.clone().add(F.clone().multiplyScalar(-Math.min(0.06, ex * DEG * 0.45)));
+  }
+  const LH = hips.clone().add(hipAxis.clone().multiplyScalar(0.11)), RH = hips.clone().add(hipAxis.clone().multiplyScalar(-0.11));
   const LK = legIK(LH, LA, pole.clone().add(leftSide.clone().multiplyScalar(0.25)));
   const RK = legIK(RH, RA, pole.clone().add(leftSide.clone().multiplyScalar(-0.25)));
   // 躯干：默认站姿 = 上方向 + 向前（脚尖侧）弯 18°，肩线朝板头打开 15°
@@ -726,6 +737,7 @@ window.addEventListener('keydown', (e) => { if (e.code === 'Space') { setPlaying
 function setPlaying(p) { st.playing = p; $('play').textContent = p ? '❚❚' : '▶'; st.last = performance.now(); syncVideo(true); }
 function seek(t) { st.t = Math.max(0, Math.min(D.meta.duration, t)); st.snap = true; syncVideo(true); }
 // 给截图脚本用
+window.__dbg = { solveBody: (t) => solveBody(t), roll: (t) => num(D.roll, t), stance: () => D.stanceSign };
 window.replay = { seek: (t) => { seek(t); frame(st.t); controls.update(); renderer.render(scene, camera); drawCursor(); }, load: (n) => { ds.value = n; load(n); }, setCam: (m) => { st.camMode = m; st.snap = true; $('cam').value = m; document.querySelectorAll('#camseg button').forEach((x) => x.classList.toggle('on', x.dataset.v === m)); }, setBody: (m) => { st.bodyMode = m; $('bodymode').value = m; load(ds.value); }, openLegend: (o) => { const e = document.getElementById('lgd'); if (e) e.open = o; }, get t() { return st.t; }, data: () => D };
 
 function loop(now) {
