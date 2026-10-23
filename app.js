@@ -504,10 +504,12 @@ function frame(t) {
   let camPos = null;
   const WUP = new T3.Vector3(0, 1, 0);
   if (st.camMode === 'chase') camPos = p.clone().add(trv.clone().multiplyScalar(-4.6)).add(WUP.clone().multiplyScalar(2.6)).add(side.clone().multiplyScalar(0.9));
+  else if (st.camMode === 'follow') { // 跟拍视角：像视频里跟拍的人一样，从坡上方沿滚落线看下去（后刃=背对镜头，前刃=面向镜头）
+    const fl = bearingVec(D.meta.fall_bearing, n); camPos = p.clone().add(fl.clone().multiplyScalar(-5.2)).add(WUP.clone().multiplyScalar(2.3)); }
   else if (st.camMode === 'side') camPos = p.clone().add(side.clone().multiplyScalar(-3.4)).add(WUP.clone().multiplyScalar(1.1)).add(trv.clone().multiplyScalar(0.6));
   else if (st.camMode === 'feet') camPos = p.clone().add(WUP.clone().multiplyScalar(2.4)).add(trv.clone().multiplyScalar(-1.2)).add(side.clone().multiplyScalar(0.3));
   else if (st.camMode === 'top') camPos = p.clone().add(new T3.Vector3(0, 22, 0.01));
-  const target = p.clone().add(n.clone().multiplyScalar(0.6)).add(trv.clone().multiplyScalar(1.2));
+  const target = st.camMode === 'follow' ? p.clone().add(n.clone().multiplyScalar(0.7)).add(bearingVec(D.meta.fall_bearing, n).multiplyScalar(1.5)) : p.clone().add(n.clone().multiplyScalar(0.6)).add(trv.clone().multiplyScalar(1.2));
   sun.position.copy(p).add(new T3.Vector3(6, 14, 5)); sun.target.position.copy(p);
   if (camPos) { camera.position.lerp(camPos, st.snap ? 1 : 0.12); controls.target.lerp(target, st.snap ? 1 : 0.2); st.snap = false; }
   else { const dlt = target.clone().sub(controls.target); controls.target.add(dlt); camera.position.add(dlt); }
