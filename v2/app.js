@@ -411,12 +411,14 @@ function solveBody(t) {
   // 颠簸吸收：板跟着雪面起伏，骨盆只跟随其中的低频部分（膝盖吃掉高频）
   let bAbs = 0; { const pn = vec(D.pos, t), bn = bump(pn.x, pn.z); let acc = 0, k = 0; for (let j = 1; j <= 6; j++) { const tt = Math.max(0, t - j * 0.07); const pj = vec(D.pos, tt); acc += bump(pj.x, pj.z); k++; } bAbs = bn - acc / k; }
   // v2：下蹲幅度收窄（基准 6 cm + 立刃最多再 7 cm），不再随立刃大起大落；颠簸吸收保留但限幅更小
-  let crouch = 0.06 + 0.07 * ea + 0.03 * Math.min(1, Math.max(0, gmag - 1)) + Math.max(-0.03, Math.min(0.05, bAbs));   // 弯顶压低，换刃时伸展
+  // v2 熟练度：新手（立刃浅、全程搓雪）不会主动往下压——基本站直、膝盖微屈；老手立刃深才压得低。按熟练度缩放下蹲
+  const SK = D.skill ?? 1;
+  let crouch = (0.06 + 0.07 * ea + 0.03 * Math.min(1, Math.max(0, gmag - 1))) * (0.3 + 0.7 * SK) + Math.max(-0.03, Math.min(0.05, bAbs)) * (0.5 + 0.5 * SK);   // 弯顶压低，换刃时伸展
   crouch = smooth('crouch', crouch, t, 0.12);
   // 髋部前后：F 已经指向脚尖侧（含站姿），立刃 >0 恒为后刃，所以这里不能再乘站姿符号（原来乘了 s，反脚时后刃反而把髋推到脚尖侧，膝盖顶死、脚踝压扁）。
   // 后刃往脚跟侧坐得更多（小腿靠在高背上，比板面法向前倾不超过 ~20°），前刃髋略过脚尖
-  const heelK = edgeNow > 0 ? 1 : 0, hipShift = smooth('hipShift', -0.05 - 0.11 * ea * heelK + 0.05 * ea * (1 - heelK), t, 0.15);
-  const P0 = footMid.clone().add(up.clone().multiplyScalar(0.80 - crouch)).add(F.clone().multiplyScalar(hipShift));
+  const heelK = edgeNow > 0 ? 1 : 0, hipShift = smooth('hipShift', (-0.05 - 0.11 * ea * heelK + 0.05 * ea * (1 - heelK)) * (0.4 + 0.6 * SK), t, 0.15);
+  const P0 = footMid.clone().add(up.clone().multiplyScalar(0.80 + 0.07 * (1 - SK) - crouch)).add(F.clone().multiplyScalar(hipShift));
   let hips = chestQ ? footMid.clone().add(P0.clone().sub(footMid).applyQuaternion(pelvisQ)) : P0;
   // 倒地姿态：后刃=坐在雪上（臀部落在脚跟一侧、离雪面 12 cm），前刃=跪（膝盖着雪、臀部在脚尖一侧抬高）；都按雪面法向摆，避免穿模
   const fs2 = st.fallSide || 1;
@@ -441,7 +443,7 @@ function solveBody(t) {
   const kneeFlex = (H, A, k) => { const K = legIK(H, A, pole.clone().add(leftSide.clone().multiplyScalar(k))); const a = H.clone().sub(K).normalize(), b = A.clone().sub(K).normalize(); return 180 - Math.acos(Math.max(-1, Math.min(1, a.dot(b)))) / DEG; };
   if (fallW < 0.3) for (let it = 0; it < 8; it++) {
     const LHt = hips.clone().add(hipAxis.clone().multiplyScalar(0.11)), RHt = hips.clone().add(hipAxis.clone().multiplyScalar(-0.11));
-    const exK = Math.max(kneeFlex(LHt, LA, 0.25), kneeFlex(RHt, RA, -0.25)) - 105;
+    const exK = Math.max(kneeFlex(LHt, LA, 0.25), kneeFlex(RHt, RA, -0.25)) - (45 + 60 * SK);   // 膝屈上限：新手 ~45°，老手 105°
     const exT = edgeNow <= 0 ? Math.max(shinFwd(LHt, LA, 0.25), shinFwd(RHt, RA, -0.25)) - 38 : 0;
     if (exK <= 0.5 && exT <= 0.5) break;
     if (exK > 0.5) hips = hips.clone().add(up.clone().multiplyScalar(Math.min(0.03, exK * 0.0015)));
@@ -750,6 +752,10 @@ function load(name) {
     const al = (D.meta.video && D.meta.video.align) || null, at = $('aligntag');
     if (D.meta.video) { at.style.display = ''; at.textContent = '对齐 · ' + (al && al.verified ? '已核对' : '未核对'); at.title = (al ? al.method + (al.check ? '；核对：' + al.check : '') : '时间水印') + '\n' + (D.meta.video.note || ''); at.className = 'pill ' + (al && al.verified ? 'ok' : 'est'); }
     else at.style.display = 'none'; }
+  { // 熟练度 0..1：滑行中（>2 m/s）立刃 p90，15° 以下=新手，45° 以上=熟练；数据里给了 meta.skill 就用给的
+    const ab = []; for (let i = 0; i < D.t.length; i++) if (D.speed[i] > 2) ab.push(Math.abs(D.roll[i])); ab.sort((a, b) => a - b);
+    const p90 = ab.length ? ab[Math.floor(ab.length * 0.9)] : 30;
+    D.skill = D.meta.skill ?? Math.max(0, Math.min(1, (p90 - 15) / 30)); D.skillP90 = p90; }
   $('trajtag').textContent = D.meta.gps_ok ? '轨迹 · GPS 融合' : '轨迹 · 侧切模型推算';
   $('trajtag').className = 'tag ' + (D.meta.gps_ok ? 'ok' : 'est');
   $('legend').innerHTML = legendHtml();
