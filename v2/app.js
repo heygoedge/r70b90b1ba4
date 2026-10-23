@@ -127,7 +127,7 @@ function build() {
   const tg = new T3.BufferGeometry(); tg.setAttribute('position', new T3.Float32BufferAttribute(tk, 3));
   const ticks = new T3.LineSegments(tg, new T3.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.55 })); ticks.frustumCulled = false; ticks.visible = false; root.add(ticks); // 已由扫雪面替代（边滑边出）
   // GPS 原始点
-  if (D.gps && D.gps.length) {
+  if (D.gps && D.gps.length && D.meta.gps_ok) {   // v2：GPS 判为不可用时不画原始点（室内乱飘的红点）
     const gg = new T3.SphereGeometry(0.18, 8, 6), gm = new T3.MeshBasicMaterial({ color: D.meta.gps_ok ? 0x3b6fd8 : 0xb04a4a, transparent: true, opacity: 0.7 });
     for (const q of D.gps) { const m = new T3.Mesh(gg, gm); m.position.set(q[1], planeY(q[1], q[2]) + 0.15, q[2]); root.add(m); }
   }
@@ -391,7 +391,7 @@ function solveBody(t) {
   if (world && world.board) { const nl = world.n.clone().applyQuaternion(world.board.quaternion.clone().invert()).normalize(); f = f.clone().lerp(nl, 0.35).normalize(); }
   const mode = currentBodyMode();
   const fi = Math.min(D.t.length - 1, Math.max(0, Math.round(t * D.meta.fs))), fside = D.fall ? D.fall[fi] : 0;
-  const fallW = D.fallW ? num(D.fallW, t) : 0, kneelK = D.fallKneel ? num(D.fallKneel, t) : 0, recline = D.fallRecline ? num(D.fallRecline, t) : 0;
+  const fallFwd = D.fallFwd ? num(D.fallFwd, t) : 0, fallW = D.fallW ? num(D.fallW, t) : 0, kneelK = D.fallKneel ? num(D.fallKneel, t) : 0, recline = D.fallRecline ? num(D.fallRecline, t) : 0;
   if (D.fallSideArr && D.fallSideArr[fi]) st.fallSide = D.fallSideArr[fi];
   const nlS = (world && world.board) ? world.n.clone().applyQuaternion(world.board.quaternion.clone().invert()).normalize() : Y.clone();
   // 动态量：板转速（°/s，俯视顺时针为正）、立刃、比力大小 → 用来驱动上身的"主动动作"（估算，标注在面板里）
@@ -456,7 +456,7 @@ function solveBody(t) {
   const twist = smooth('twist', Math.max(-28, Math.min(28, -wr * 0.16)) + 10 * Math.sign(edgeNext - edgeNow) * Math.min(1, Math.abs(edgeNext - edgeNow) / 25) * (Math.abs(edgeNow) < 15 ? 1 : 0), t, 0.18);
   let W = leftSide.clone().applyAxisAngle(up, (15 + twist) * DEG * s).normalize();
   if (chestQ) { U = U.applyQuaternion(chestQ).normalize(); W = W.applyQuaternion(chestQ).normalize(); } // 胸口手机的实测转动叠加在动态站姿上
-  if (fallW > 0.01) { const back = fs2 > 0 ? -(0.35 + 0.9 * recline) * (1 - kneelK) + 0.15 * kneelK : 0.15;
+  if (fallW > 0.01) { const back = fs2 > 0 ? -(0.35 + 0.9 * recline) * (1 - kneelK) + 0.15 * kneelK : 0.15 + 1.6 * fallFwd;   // 四肢着地：上身往脚尖侧趴约 60°
     const Uf = nlS.clone().add(toeDir.clone().multiplyScalar(back)).normalize(); U = U.clone().lerp(Uf, fallW).normalize(); }
   let Fw = U.clone().cross(W).normalize(); if (Fw.dot(F) < 0) Fw.negate(); // 胸口朝向：垂直于肩线和躯干、朝脚尖一侧（v2：原来按站姿乘号，反脚时朝向脚跟、手跑到背后）
   const spine = hips.clone().add(U.clone().multiplyScalar(0.2)), chest = hips.clone().add(U.clone().multiplyScalar(0.4));
@@ -483,7 +483,7 @@ function solveBody(t) {
   if (fallW > 0.01) { // 手撑雪面：坐=撑在身后，跪=撑在身前
     const back = toeDir.clone().multiplyScalar(fs2 > 0 ? 1 - 2 * (1 - kneelK) : 1);
     for (const [E, Wr, sh, sg] of [[LE, LW, LS, 1], [RE, RW, RS, -1]]) {
-      const hand = hips.clone().add(back.clone().multiplyScalar(0.28)).add(leftSide.clone().multiplyScalar(0.22 * sg)).add(nlS.clone().multiplyScalar(-(hips.clone().sub(footMid).dot(nlS)) + 0.03));
+      const hand = hips.clone().add(back.clone().multiplyScalar(0.28 + 0.3 * fallFwd)).add(leftSide.clone().multiplyScalar(0.22 * sg)).add(nlS.clone().multiplyScalar(-(hips.clone().sub(footMid).dot(nlS)) + 0.03));
       const elb = sh.clone().lerp(hand, 0.5).add(back.clone().multiplyScalar(0.06));
       Wr.lerp(hand, fallW); E.lerp(elb, fallW);
     }
@@ -735,7 +735,15 @@ function load(name) {
         D.fallKneel[k] = side > 0 ? ss((k - c) / (0.45 * (d - c))) : 1;                                            // 后刃坐 → 前刃跪撑
         D.fallRecline[k] = (k > b && k < c) ? Math.sin(Math.PI * (k - b) / (c - b)) : 0;                         // 坐着时中段后仰
       }
-      i = Math.max(j, d + 1); } }
+      i = Math.max(j, d + 1); }
+    // v2：视频标注的事件（传感器测不出来的，例如板平放着往前跪倒）。meta.events=[{type:'kneel', down, set, rise, up, src}]，单位为片段内秒
+    D.fallFwd = new Float32Array(n);   // 0=跪直，1=双手撑雪趴下（四肢着地）
+    for (const ev of (D.meta.events || [])) {
+      if (ev.type !== 'kneel') continue;
+      for (let k = 0; k < n; k++) { const tk = D.t[k];
+        if (tk < ev.down || tk > ev.up) continue;
+        const w = tk <= ev.set ? ss((tk - ev.down) / (ev.set - ev.down)) : tk <= ev.rise ? 1 : 1 - ss((tk - ev.rise) / (ev.up - ev.rise));
+        if (w > D.fallW[k]) { D.fallW[k] = w; D.fallKneel[k] = 1; D.fallRecline[k] = 0; D.fallSideArr[k] = -1; D.fallFwd[k] = ev.pose === 'upright' ? 0 : w; } } } }
   { const fromBoard = (D.meta.notes || []).some((x) => x.startsWith('站姿按雪板前后刃判定'));
     const sp = $('stancetag'); sp.textContent = (D.meta.stance === 'goofy' ? '反脚' : '正脚') + ' · ' + (fromBoard ? '雪板判定' : '档案'); sp.title = fromBoard ? '站姿按雪板前后刃与转向关系判定，与用户档案不一致，已覆盖档案' : '站姿来自算法/用户档案';
     sp.className = 'pill ' + (fromBoard ? 'est' : 'ok');
