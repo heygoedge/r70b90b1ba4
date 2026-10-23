@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D 回放 · 旧版 vs 新版 对比</title>
+<style>
+  :root { --bg:#0b0d12; --card:#151922; --line:#2a3140; --txt:#e8ecf3; --dim:#8a93a6; --lime:#c6f432; }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--txt); font:13px -apple-system, "PingFang SC", sans-serif; height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; gap:10px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header b { font-size:14px; } select, button { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px; }
+  button.on { background:var(--lime); color:#111; } input[type=range] { flex:1; min-width:200px; }
+  #t { font-variant-numeric:tabular-nums; color:var(--dim); min-width:90px; }
+  main { flex:1; display:grid; grid-template-rows:1fr 1fr; gap:4px; padding:4px; min-height:0; }
+  body.cols main { grid-template-rows:none; grid-template-columns:1fr 1fr; }
+  .pane { position:relative; border:1px solid var(--line); border-radius:8px; overflow:hidden; min-height:0; }
+  .pane iframe { width:100%; height:100%; border:0; display:block; }
+  .lab { position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,.65); padding:4px 10px; border-radius:6px; font-weight:700; pointer-events:none; }
+  .lab.new { color:var(--lime); }
+  details { color:var(--dim); font-size:12px; } details ul { margin:4px 0 0 16px; padding:0; }
+</style></head>
+<body>
+<header>
+  <b>3D 回放对比</b>
+  <select id="ds"></select>
+  <select id="cam"><option value="follow">跟拍（坡上沿滚落线，同视频机位）</option><option value="chase">行进方向后方</option><option value="side">侧面</option></select>
+  <button id="play">▶ 播放</button>
+  <input type="range" id="sl" min="0" max="100" step="0.01" value="0"><span id="t">0.00 s</span>
+  <button id="ghost" title="新版：估算出来的身体画成半透明">新版半透明</button>
+  <button id="lay">上下 / 左右</button>
+  <details><summary>新版改了什么</summary><ul>
+    <li>下蹲幅度收窄（基准 6 cm + 立刃最多再 7 cm），不再随立刃大起大落</li>
+    <li>关节限位 + 回退：膝屈 ≤105°，前刃小腿前倾 ≤38°，后刃 ≤18°；超限就抬髋/回收，宁可少蹲</li>
+    <li>播放时 3D 跟着视频"已显示的那一帧"走（requestVideoFrameCallback），帧间最多外推一帧</li>
+    <li>顶栏标出站姿来源（雪板判定/档案）和视频对齐方式（已核对/未核对，悬停看细节）</li>
+    <li>可选：估算出来的身体画成半透明</li>
+  </ul></details>
+</header>
+<main>
+  <div class="pane"><iframe id="a"></iframe><div class="lab">旧版（当前线上）</div></div>
+  <div class="pane"><iframe id="b"></iframe><div class="lab new">新版 v2</div></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id), qs = new URLSearchParams(location.search);
+const A = $('a'), B = $('b'); let ds = qs.get('ds') || 'ly_r8', cam = qs.get('cam') || 'follow', ghost = qs.get('ghost') === '1', playing = false, dur = 60, dragging = false;
+function src(base) { return `${base}?ds=${ds}&cam=${cam}&rec=1${base.startsWith('v2') && ghost ? '&ghost=1' : ''}`; }
+function loadBoth() { playing = false; $('play').textContent = '▶ 播放'; A.src = src('index.html'); B.src = src('v2/index.html');
+  history.replaceState(null, '', `?ds=${ds}&cam=${cam}${ghost ? '&ghost=1' : ''}`); }
+const R = (f) => f.contentWindow && f.contentWindow.replay;
+function ready() { return R(A) && R(B) && A.contentWindow.__ready && B.contentWindow.__ready; }
+function initList() {
+  // 数据集列表从旧版页面里取（两边读的是同一份数据）
+  const w = A.contentWindow; if (!w || !w.REPLAY_LIST) return setTimeout(initList, 300);
+  const sel = $('ds'); sel.innerHTML = ''; for (const n of w.REPLAY_LIST) { const o = document.createElement('option'); o.value = n; o.textContent = (w.REPLAY_DATA[n] || {}).meta ? w.REPLAY_DATA[n].meta.title : n; sel.appendChild(o); }
+  sel.value = ds;
+}
+function clickPlay(f, p) { const r = R(f); if (!r) return; if (typeof r.play === 'function') r.play(p); else { const btn = f.contentDocument.getElementById('play'); const isPlaying = btn.textContent.trim() !== '▶'; if (isPlaying !== p) btn.click(); } }
+$('play').onclick = () => { if (!ready()) return; playing = !playing; $('play').textContent = playing ? '❚❚ 暂停' : '▶ 播放';
+  const t = R(A).t; R(B).seek(t); clickPlay(A, playing); clickPlay(B, playing); };
+$('sl').oninput = () => { dragging = true; if (!ready()) return; const t = +$('sl').value; R(A).seek(t); R(B).seek(t); };
+$('sl').onchange = () => { dragging = false; };
+$('ds').onchange = (e) => { ds = e.target.value; loadBoth(); };
+$('cam').onchange = (e) => { cam = e.target.value; if (ready()) { R(A).setCam(cam); R(B).setCam(cam); } };
+$('ghost').onclick = () => { ghost = !ghost; $('ghost').classList.toggle('on', ghost); const d = B.contentDocument; d && d.getElementById('ghostbtn') && d.getElementById('ghostbtn').click(); };
+$('lay').onclick = () => document.body.classList.toggle('cols');
+$('cam').value = cam; $('ghost').classList.toggle('on', ghost);
+// 同步：以旧版时间为准，新版偏差超过 0.15 s 就拉回来
+setInterval(() => {
+  if (!ready()) return; const ta = R(A).t, tb = R(B).t; dur = R(A).data().meta.duration; $('sl').max = dur;
+  if (!dragging) $('sl').value = ta; $('t').textContent = ta.toFixed(2) + ' / ' + dur.toFixed(1) + ' s';
+  if (playing && Math.abs(ta - tb) > 0.15) R(B).seek(ta);
+  if (playing && ta >= dur - 0.05) { playing = false; $('play').textContent = '▶ 播放'; }
+}, 100);
+loadBoth(); setTimeout(initList, 500);
+</script>
+</body></html>
